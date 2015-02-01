@@ -151,7 +151,16 @@
         [LinphoneUtils buttonFixStates:videoButton];
         [LinphoneUtils buttonFixStates:videoButtonLandscape];
     }
-    
+
+    {
+        UIImageView* leftPaddingLandscape = (UIImageView*)[landscapeView viewWithTag:self.leftPadding.tag];
+        leftPaddingLandscape.image =[UIImage imageNamed:@"incall_padding_left_landscape.png"];
+    }
+    {
+        UIImageView* rightPaddingLandscape = (UIImageView*)[landscapeView viewWithTag:self.rightPadding.tag];
+        rightPaddingLandscape.image = [UIImage imageNamed:@"incall_padding_right_landscape.png"];
+    }
+
     {
         UIButton *speakerButtonLandscape = (UIButton*) [landscapeView viewWithTag:[speakerButton tag]];
         // Set selected+disabled background: IB lack !
@@ -564,7 +573,12 @@
     [attributes setObject:[NSValue valueWithCGRect:view.bounds] forKey:@"bounds"];
     if([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;    
-        [LinphoneUtils buttonMultiViewAddAttributes:attributes button:button];
+		[LinphoneUtils buttonMultiViewAddAttributes:attributes button:button];
+	} else if (view.tag ==self.leftPadding.tag || view.tag == self.rightPadding.tag){
+		UIImage* image = [(UIImageView*)view image];
+		if( image ){
+			[attributes setObject:image forKey:@"image"];
+		}
     }
     [attributes setObject:[NSNumber numberWithInteger:view.autoresizingMask] forKey:@"autoresizingMask"];
 
@@ -577,6 +591,9 @@
     if([view isKindOfClass:[UIButton class]]) {
         UIButton *button = (UIButton *)view;
         [LinphoneUtils buttonMultiViewApplyAttributes:attributes button:button];
+    } else if (view.tag ==self.leftPadding.tag || view.tag == self.rightPadding.tag){
+
+        [(UIImageView*)view setImage:[attributes objectForKey:@"image"]];
     }
     view.autoresizingMask = [[attributes objectForKey:@"autoresizingMask"] integerValue];
 }

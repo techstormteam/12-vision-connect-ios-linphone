@@ -4,6 +4,7 @@ keepalive_period=30000
 default_proxy=0
 sip_port=-1
 sip_tcp_port=-1
+use_ipv6=0
 
 [rtp]
 audio_rtp_port=7076
@@ -29,7 +30,6 @@ capture_dev_id=AU: Audio Unit Receiver
 eq_active=0
 
 [app]
-rotation_preference=auto
 animations_preference=1
 edge_opt_preference=0
 use_system_contacts=0

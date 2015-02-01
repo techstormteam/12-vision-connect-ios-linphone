@@ -59,6 +59,7 @@
 @property (retain, nonatomic) IBOutlet UITextField *provisionedDomain;
 
 @property (nonatomic, retain) IBOutlet UIImageView *choiceViewLogoImageView;
+@property (retain, nonatomic) IBOutlet UISegmentedControl *transportChooser;
 
 @property (nonatomic, retain) IBOutlet UITapGestureRecognizer *viewTapGestureRecognizer;
 
@@ -70,7 +71,7 @@
 - (IBAction)onCancelClick:(id)sender;
 
 - (IBAction)onCreateAccountClick:(id)sender;
-- (IBAction)onConnectAccountClick:(id)sender;
+- (IBAction)onConnectLinphoneAccountClick:(id)sender;
 - (IBAction)onExternalAccountClick:(id)sender;
 - (IBAction)onCheckValidationClick:(id)sender;
 - (IBAction)onRemoteProvisioningClick:(id)sender;

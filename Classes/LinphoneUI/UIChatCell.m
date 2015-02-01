@@ -72,33 +72,9 @@
 #pragma mark - 
 
 - (NSString *)accessibilityValue {
-    return [NSString stringWithFormat:@"%@ - %@ (%d)", addressLabel.text, chatContentLabel.text, [unreadMessageLabel.text integerValue]];
+    return [NSString stringWithFormat:@"%@ - %@ (%ld)", addressLabel.text, chatContentLabel.text, (long)[unreadMessageLabel.text integerValue]];
 }
 
-- (LinphoneChatMessage*)getLastIncomingMessage {
-    LinphoneChatMessage* last_message = nil;
-    MSList* last_message_list = linphone_chat_room_get_history(chatRoom, 20);
-    MSList* iterator = nil;
-
-    // find last element of the list:
-    iterator = last_message_list;
-    while (iterator && iterator->next) {
-        iterator = iterator->next;
-    }
-
-    // walk the list in reverse to find the last incoming message
-    while (iterator) {
-        LinphoneChatMessage* msg = iterator->data;
-        if( !linphone_chat_message_is_outgoing(msg)){
-            last_message = msg;
-            break;
-        }
-        iterator = iterator->prev;
-    }
-    ms_list_free(last_message_list);
-
-    return last_message;
-}
 
 - (void)update {
 	NSString *displayName = nil;
@@ -123,7 +99,10 @@
     
     // Display name
     if(displayName == nil) {
-        displayName = [NSString stringWithUTF8String:linphone_address_get_username(linphoneAddress)];
+		const char* username = linphone_address_get_username(linphoneAddress);
+		char* address = linphone_address_as_string(linphoneAddress);
+		displayName = [NSString stringWithUTF8String:username?:address];
+		ms_free(address);
     }
     [addressLabel setText:displayName];
 
@@ -133,7 +112,7 @@
     }
     [avatarImage setImage:image];
 
-    LinphoneChatMessage* last_message = [self getLastIncomingMessage];
+    LinphoneChatMessage* last_message = linphone_chat_room_get_user_data(chatRoom);
 
     if( last_message ){
 

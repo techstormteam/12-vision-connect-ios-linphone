@@ -98,18 +98,16 @@ struct NetworkReachabilityContext {
 @end
 
 typedef struct _LinphoneManagerSounds {
-    SystemSoundID call;
-    SystemSoundID message;
     SystemSoundID vibrate;
 } LinphoneManagerSounds;
 
 @interface LinphoneManager : NSObject {
 @protected
 	SCNetworkReachabilityRef proxyReachability;
-
+	
 @private
 	NSTimer* mIterateTimer;
-    NSMutableArray*  pendindCallIdFromRemoteNotif;
+    NSMutableArray*  pushCallIDs;
 	Connectivity connectivity;
 	UIBackgroundTaskIdentifier pausedCallBgTask;
 	UIBackgroundTaskIdentifier incallBgTask;
@@ -132,20 +130,20 @@ typedef struct _LinphoneManagerSounds {
 + (NSString *)getUserAgent;
 + (int)unreadMessageCount;
 
-
+- (void)playMessageSound;
 - (void)resetLinphoneCore;
 - (void)startLibLinphone;
 - (void)destroyLibLinphone;
 - (BOOL)resignActive;
 - (void)becomeActive;
 - (BOOL)enterBackgroundMode;
-- (void)enableAutoAnswerForCallId:(NSString*) callid;
-- (void)addPushTokenToProxyConfig: (LinphoneProxyConfig*)cfg;
-- (BOOL)shouldAutoAcceptCallForCallId:(NSString*) callId;
+- (void)addPushCallId:(NSString*) callid;
+- (void)configurePushTokenForProxyConfig: (LinphoneProxyConfig*)cfg;
+- (BOOL)popPushCallID:(NSString*) callId;
 - (void)acceptCallForCallId:(NSString*)callid;
 - (void)cancelLocalNotifTimerForCallId:(NSString*)callid;
 
-
++ (BOOL)langageDirectionIsRTL;
 + (void)kickOffNetworkConnection;
 - (void)setupNetworkReachabilityCallback;
 
@@ -154,6 +152,7 @@ typedef struct _LinphoneManagerSounds {
 - (bool)allowSpeaker;
 
 - (void)configureVbrCodecs;
+- (void)setLogsEnabled:(BOOL)enabled;
 
 + (BOOL)copyFile:(NSString*)src destination:(NSString*)dst override:(BOOL)override;
 + (NSString*)bundleFile:(NSString*)file;
@@ -181,11 +180,13 @@ typedef struct _LinphoneManagerSounds {
 - (BOOL)lpConfigBoolForKey:(NSString*)key forSection:(NSString*)section;
 - (void)silentPushFailed:(NSTimer*)timer;
 
+@property (readonly) BOOL isTesting;
 @property (readonly) FastAddressBook* fastAddressBook;
 @property Connectivity connectivity;
 @property (readonly) NetworkType network;
 @property (readonly) const char*  frontCamId;
 @property (readonly) const char*  backCamId;
+@property (retain, nonatomic) NSString* SSID;
 @property (readonly) sqlite3* database;
 @property (nonatomic, retain) NSData *pushNotificationToken;
 @property (readonly) LinphoneManagerSounds sounds;

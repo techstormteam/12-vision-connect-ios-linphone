@@ -197,17 +197,21 @@ static UIFont *CELL_FONT = nil;
     [dateFormatter release];
 
     LinphoneChatMessageState state = linphone_chat_message_get_state(chat);
+    BOOL outgoing = linphone_chat_message_is_outgoing(chat);
 
-    if( !linphone_chat_message_is_outgoing(chat) ){
+    if( !outgoing ){
         statusImage.hidden = TRUE; // not useful for incoming chats..
     } else if (state== LinphoneChatMessageStateInProgress) {
 		[statusImage setImage:[UIImage imageNamed:@"chat_message_inprogress.png"]];
+        [statusImage setAccessibilityValue:@"in progress"];
 		statusImage.hidden = FALSE;
 	} else if (state == LinphoneChatMessageStateDelivered) {
 		[statusImage setImage:[UIImage imageNamed:@"chat_message_delivered.png"]];
+        [statusImage setAccessibilityValue:@"delivered"];
 		statusImage.hidden = FALSE;
 	} else {
 		[statusImage setImage:[UIImage imageNamed:@"chat_message_not_delivered.png"]];
+        [statusImage setAccessibilityValue:@"not delivered"];
 		statusImage.hidden = FALSE;
 
         NSAttributedString* resend_text = [[NSAttributedString alloc]
@@ -216,6 +220,13 @@ static UIFont *CELL_FONT = nil;
         [dateLabel setAttributedText:resend_text];
         [resend_text release];
 	}
+    
+    if( outgoing){
+        [messageText setAccessibilityLabel:@"Outgoing message"];
+    } else {
+        [messageText setAccessibilityLabel:@"Incoming message"];
+    }
+    
 }
 
 - (void)setEditing:(BOOL)editing {
@@ -300,12 +311,14 @@ static UIFont *CELL_FONT = nil;
         CGRect messageFrame = [bubbleView frame];
         messageFrame.origin.y = ([innerView frame].size.height - messageFrame.size.height)/2;
         if(!is_outgoing) { // Inverted
-            [backgroundImage setImage:[TUNinePatchCache imageOfSize:[backgroundImage bounds].size
-                                                  forNinePatchNamed:@"chat_bubble_incoming"]];
+            UIImage* image = [UIImage imageNamed:@"chat_bubble_incoming"];
+            image = [image resizableImageWithCapInsets:UIEdgeInsetsMake(26, 32, 34, 56)];
+            [backgroundImage setImage:image];
             messageFrame.origin.y += 5;
         } else {
-            [backgroundImage setImage:[TUNinePatchCache imageOfSize:[backgroundImage bounds].size
-                                                  forNinePatchNamed:@"chat_bubble_outgoing"]];
+            UIImage* image = [UIImage imageNamed:@"chat_bubble_outgoing"];
+            image = [image resizableImageWithCapInsets:UIEdgeInsetsMake(14, 15, 25, 40)];
+            [backgroundImage setImage:image];
             messageFrame.origin.y -= 5;
         }
         [bubbleView setFrame:messageFrame];

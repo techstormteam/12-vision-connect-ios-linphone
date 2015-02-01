@@ -24,7 +24,6 @@
 #import "CoreTelephony/CTCallCenter.h"
 #import "CoreTelephony/CTCall.h"
 
-#import "ConsoleViewController.h"
 #import "LinphoneCoreSettingsStore.h"
 
 #include "LinphoneManager.h"
@@ -173,24 +172,29 @@
 
     UIApplication* app= [UIApplication sharedApplication];
     UIApplicationState state = app.applicationState;
-    
-    if( [app respondsToSelector:@selector(registerUserNotificationSettings:)] ){
-        /* iOS8 notifications can be actioned! Awesome: */
-        UIUserNotificationType notifTypes = UIUserNotificationTypeBadge|UIUserNotificationTypeSound|UIUserNotificationTypeAlert;
-       
-        NSSet* categories = [NSSet setWithObjects:[self getCallNotificationCategory], [self getMessageNotificationCategory], nil];
-        UIUserNotificationSettings* userSettings = [UIUserNotificationSettings settingsForTypes:notifTypes categories:categories];
-        [app registerUserNotificationSettings:userSettings];
-        [app registerForRemoteNotifications];
-    } else {
-        NSUInteger notifTypes = UIRemoteNotificationTypeAlert|UIRemoteNotificationTypeSound|UIRemoteNotificationTypeBadge|UIRemoteNotificationTypeNewsstandContentAvailability;
-        [app registerForRemoteNotificationTypes:notifTypes];
-    }
 
 	LinphoneManager* instance = [LinphoneManager instance];
     BOOL background_mode = [instance lpConfigBoolForKey:@"backgroundmode_preference"];
     BOOL start_at_boot   = [instance lpConfigBoolForKey:@"start_at_boot_preference"];
-
+    
+    
+    if( !instance.isTesting ){
+        if( [app respondsToSelector:@selector(registerUserNotificationSettings:)] ){
+            /* iOS8 notifications can be actioned! Awesome: */
+            UIUserNotificationType notifTypes = UIUserNotificationTypeBadge|UIUserNotificationTypeSound|UIUserNotificationTypeAlert;
+            
+            NSSet* categories = [NSSet setWithObjects:[self getCallNotificationCategory], [self getMessageNotificationCategory], nil];
+            UIUserNotificationSettings* userSettings = [UIUserNotificationSettings settingsForTypes:notifTypes categories:categories];
+            [app registerUserNotificationSettings:userSettings];
+            [app registerForRemoteNotifications];
+        } else {
+            NSUInteger notifTypes = UIRemoteNotificationTypeAlert|UIRemoteNotificationTypeSound|UIRemoteNotificationTypeBadge|UIRemoteNotificationTypeNewsstandContentAvailability;
+            [app registerForRemoteNotificationTypes:notifTypes];
+        }
+    } else {
+        NSLog(@"No remote push for testing");
+    }
+    
 
     if (state == UIApplicationStateBackground)
     {
@@ -233,8 +237,9 @@
 
 - (BOOL)application:(UIApplication *)application handleOpenURL:(NSURL *)url {
     NSString *scheme = [[url scheme] lowercaseString];
-    if ([scheme isEqualToString:@"linphone-config-http"] || [scheme isEqualToString:@"linphone-config-https"]) {
-        configURL = [[NSString alloc] initWithString:[[url absoluteString] stringByReplacingOccurrencesOfString:@"linphone-config-" withString:@""]];
+    if ([scheme isEqualToString:@"linphone-config"] || [scheme isEqualToString:@"linphone-config"]) {
+        NSString* encodedURL = [[url absoluteString] stringByReplacingOccurrencesOfString:@"linphone-config://" withString:@""];
+        self.configURL = [encodedURL stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
         UIAlertView* confirmation = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Remote configuration",nil)
                                                         message:NSLocalizedString(@"This operation will load a remote configuration. Continue ?",nil)
                                                        delegate:self
@@ -245,10 +250,12 @@
         [confirmation release];
     } else {
         if([[url scheme] isEqualToString:@"sip"]) {
-            // Go to Dialer view
-            DialerViewController *controller = DYNAMIC_CAST([[PhoneMainView instance] changeCurrentView:[DialerViewController compositeViewDescription]], DialerViewController);
+			// remove "sip://" from the URI, and do it correctly by taking resourceSpecifier and removing leading and trailing "/"
+			NSString* sipUri = [[url resourceSpecifier] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+
+			DialerViewController *controller = DYNAMIC_CAST([[PhoneMainView instance] changeCurrentView:[DialerViewController compositeViewDescription]], DialerViewController);
             if(controller != nil) {
-                [controller setAddress:[url absoluteString]];
+                [controller setAddress:sipUri];
             }
         }
     }
@@ -265,11 +272,7 @@
 }
 
 - (void)processRemoteNotification:(NSDictionary*)userInfo{
-	if ([LinphoneManager instance].pushNotificationToken==Nil){
-		[LinphoneLogger log:LinphoneLoggerLog format:@"Ignoring push notification we did not subscribed."];
-		return;
-	}
-	
+
 	NSDictionary *aps = [userInfo objectForKey:@"aps"];
 	
     if(aps != nil) {
@@ -284,18 +287,22 @@
 				[LinphoneManager instance].connectivity=none; /*force connectivity to be discovered again*/
                 [[LinphoneManager instance] refreshRegisters];
 				if(loc_key != nil) {
-					if([loc_key isEqualToString:@"IM_MSG"]) {
-						[[PhoneMainView instance] addInhibitedEvent:kLinphoneTextReceived];
+
+					NSString* callId = [userInfo objectForKey:@"call-id"];
+					if( callId != nil ){
+						[[LinphoneManager instance] addPushCallId:callId];
+					} else {
+						[LinphoneLogger log:LinphoneLoggerError format:@"PushNotification: does not have call-id yet, fix it !"];
+					}
+
+					if( [loc_key isEqualToString:@"IM_MSG"] ) {
+
 						[[PhoneMainView instance] changeCurrentView:[ChatViewController compositeViewDescription]];
-					} else if([loc_key isEqualToString:@"IC_MSG"]) {
-						//it's a call
-						NSString *callid=[userInfo objectForKey:@"call-id"];
-						if (callid)
-							[[LinphoneManager instance] enableAutoAnswerForCallId:callid];
-						else
-							[LinphoneLogger log:LinphoneLoggerError format:@"PushNotification: does not have call-id yet, fix it !"];
+
+					} else if( [loc_key isEqualToString:@"IC_MSG"] ) {
 
 						[self fixRing];
+
 					}
 				}
 			}
@@ -324,7 +331,7 @@
 }
 
 - (void)application:(UIApplication *)application didReceiveLocalNotification:(UILocalNotification *)notification {
-    Linphone_log(@"%@ - state = %d", NSStringFromSelector(_cmd), application.applicationState);
+    Linphone_log(@"%@ - state = %ld", NSStringFromSelector(_cmd), (long)application.applicationState);
 
     [self fixRing];
 
@@ -344,9 +351,9 @@
         NSString *remoteContact = (NSString*)[notification.userInfo objectForKey:@"from"];
         // Go to ChatRoom view
         [[PhoneMainView instance] changeCurrentView:[ChatViewController compositeViewDescription]];
+		LinphoneChatRoom*room = [self findChatRoomForContact:remoteContact];
         ChatRoomViewController *controller = DYNAMIC_CAST([[PhoneMainView instance] changeCurrentView:[ChatRoomViewController compositeViewDescription] push:TRUE], ChatRoomViewController);
-        if(controller != nil) {
-            LinphoneChatRoom*room = [self findChatRoomForContact:remoteContact];
+        if(controller != nil && room != nil) {
             [controller setChatRoom:room];
         }
     } else if([notification.userInfo objectForKey:@"callLog"] != nil) {
@@ -365,11 +372,6 @@
 {
     Linphone_log(@"%@ : %@", NSStringFromSelector(_cmd), userInfo);
     LinphoneManager* lm = [LinphoneManager instance];
-	
-	if (lm.pushNotificationToken==Nil){
-		[LinphoneLogger log:LinphoneLoggerLog format:@"Ignoring push notification we did not subscribed."];
-		return;
-	}
 
     // save the completion handler for later execution.
     // 2 outcomes:

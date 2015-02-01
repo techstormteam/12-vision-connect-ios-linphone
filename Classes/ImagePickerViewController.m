@@ -67,6 +67,7 @@ static UICompositeViewDescription *compositeDescription = nil;
                                                              fullscreen:false
                                                           landscapeMode:[LinphoneManager runningOnIpad]
                                                            portraitMode:true];
+		compositeDescription.darkBackground = false;
     }
     return compositeDescription;
 }
@@ -87,37 +88,20 @@ static UICompositeViewDescription *compositeDescription = nil;
     [pickerController setDelegate:self];
 }
 
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    if ([[UIDevice currentDevice].systemVersion doubleValue] < 5.0) {
-        [pickerController viewWillAppear:animated];
-    }
-}
-
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     if(popoverController != nil) {
         [popoverController presentPopoverFromRect:CGRectZero inView:self.view permittedArrowDirections:UIPopoverArrowDirectionAny animated:FALSE];
-    } else if ([[UIDevice currentDevice].systemVersion doubleValue] < 5.0) {
-        [pickerController viewDidAppear:animated];
     }
     [[UIApplication sharedApplication] setStatusBarHidden:NO]; //Fix UIImagePickerController status bar hide
-    [[UIApplication sharedApplication] setStatusBarStyle:UIStatusBarStyleBlackOpaque]; //Fix UIImagePickerController status bar style change
+    [[UIApplication sharedApplication] setStatusBarStyle:UIStatusBarStyleDefault]; //Fix UIImagePickerController status bar style change
 }
 
-- (void)viewDidDisappear:(BOOL)animated {
-    [super viewDidDisappear:animated];
-    if ([[UIDevice currentDevice].systemVersion doubleValue] < 5.0) {
-        [pickerController viewDidDisappear:animated];
-    }
-}
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     if(popoverController != nil) {
         [popoverController dismissPopoverAnimated: NO];
-    } else if ([[UIDevice currentDevice].systemVersion doubleValue] < 5.0) {
-        [pickerController viewWillDisappear:animated];
     }
 }
 
