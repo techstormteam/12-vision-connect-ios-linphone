@@ -11,6 +11,7 @@
 # To compile with bc prefix, use rpmbuild -ba --with bc [SPEC]
 %define 		pkg_name 	%{?_with_bc:bc-ortp}%{!?_with_bc:ortp}
 %{?_with_bc: %define 	_prefix		/opt/belledonne-communications}
+%define 		srtp 		%{?_without_srtp:0}%{?!_without_srtp:1}
 
 # re-define some directories for older RPMBuild versions which don't. This messes up the doc/ dir
 # taken from https://fedoraproject.org/wiki/Packaging:RPMMacros?rd=Packaging/RPMMacros
@@ -29,7 +30,7 @@ Release:	%(git describe --tags --abbrev=40 | sed -rn 's/^.*-([0-9]+)-g[a-z0-9]{4
 License:	LGPL
 Group:		Applications/Communications
 URL:		http://linphone.org/ortp/
-Source0:	ortp-%{version}.tar.gz
+Source0:	%{name}-%{version}.tar.gz
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-buildroot
 %ifarch %ix86
 BuildArch:	i686
@@ -63,13 +64,17 @@ develop programs using the oRTP library.
 %define ortp_cflags %ortp_arch_cflags -Wall -g -pipe -pthread -O3 -fomit-frame-pointer -fno-schedule-insns -fschedule-insns2 -fno-strict-aliasing
 
 %prep
-%setup -qn ortp-%{version}
+%setup
 
 %build
 %configure \
 	--enable-shared \
 	--enable-static \
+%if !%{srtp}
+	--with-srtp=none \
+%endif
 	--docdir=%{_docdir}
+
 %{__make} -j$RPM_BUILD_NCPUS CFLAGS="%ortp_cflags" CXXFLAGS="%ortp_cflags"
 
 %install
@@ -81,18 +86,20 @@ rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(-,root,root,-)
-%doc AUTHORS COPYING ChangeLog INSTALL NEWS README TODO
+%doc %{_docdir}/ortp-%{version}/README
+%doc %{_docdir}/ortp-%{version}/ChangeLog
+%doc %{_docdir}/ortp-%{version}/COPYING
+%doc %{_docdir}/ortp-%{version}/AUTHORS
 %{_libdir}/*.so.*
 
 %files devel
 %defattr(-,root,root,-)
-%doc doc/html/*
+%doc %{_docdir}/ortp-%{version}/html/*
 %{_libdir}/*.la
 %{_libdir}/*.a
 %{_libdir}/*.so
 %{_libdir}/pkgconfig/*.pc
 %{_includedir}
-%{_docdir}
 
 %changelog
 * Tue Oct 25 2005 Francois-Xavier Kowalski <fix@hp.com>

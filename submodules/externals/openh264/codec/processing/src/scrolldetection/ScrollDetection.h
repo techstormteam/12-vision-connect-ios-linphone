@@ -46,17 +46,12 @@
 
 WELSVP_NAMESPACE_BEGIN
 
-#ifdef HAVE_MMX
-WELSVP_EXTERN_C_BEGIN
-WELSVP_EXTERN_C_END
-#endif
-
 class CScrollDetection : public IStrategy {
  public:
   CScrollDetection (int32_t iCpuFlag) {
     m_eMethod = METHOD_SCROLL_DETECTION;
     WelsMemset (&m_sScrollDetectionParam, 0, sizeof (m_sScrollDetectionParam));
-  };
+  }
   ~CScrollDetection() {
   }
   EResult Process (int32_t iType, SPixMap* pSrcPixMap, SPixMap* pRefPixMap);

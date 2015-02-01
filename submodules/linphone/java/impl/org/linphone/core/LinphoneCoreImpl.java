@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 
 import org.linphone.core.LinphoneCall.State;
+import org.linphone.core.LinphoneCoreListener.LinphoneEchoCalibrationListener;
 import org.linphone.mediastream.Log;
 import org.linphone.mediastream.video.AndroidVideoWindowImpl;
 import org.linphone.mediastream.video.capture.hwconf.Hacks;
@@ -31,8 +32,7 @@ import org.linphone.mediastream.video.capture.hwconf.Hacks;
 import android.content.Context;
 import android.media.AudioManager;
 
-
-class LinphoneCoreImpl implements LinphoneCore {
+public class LinphoneCoreImpl implements LinphoneCore {
 
 	private final  LinphoneCoreListener mListener; //to make sure to keep a reference on this object
 	protected long nativePtr = 0;
@@ -268,6 +268,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 		return logs;
 	}
 	public synchronized void destroy() {
+		setAndroidPowerManager(null);
 		delete(nativePtr);
 		nativePtr=0;
 	}
@@ -557,8 +558,8 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized boolean isKeepAliveEnabled() {
 		return isKeepAliveEnabled(nativePtr);
 	}
-	public synchronized void startEchoCalibration(Object data) throws LinphoneCoreException {
-		startEchoCalibration(nativePtr, data);
+	public synchronized void startEchoCalibration(LinphoneEchoCalibrationListener listener) throws LinphoneCoreException {
+		startEchoCalibration(nativePtr, listener);
 	}
 
 	public synchronized Transports getSignalingTransportPorts() {
@@ -1289,5 +1290,55 @@ class LinphoneCoreImpl implements LinphoneCore {
 		} else {
 			return null;
 		}
+	}
+	
+	private native void addListener(long nativePtr, LinphoneCoreListener listener);
+	@Override
+	public void addListener(LinphoneCoreListener listener) {
+		addListener(nativePtr, listener);
+	}
+	
+	private native void removeListener(long nativePtr, LinphoneCoreListener listener);
+	@Override
+	public void removeListener(LinphoneCoreListener listener) {
+		removeListener(nativePtr, listener);
+	}
+	private native void setRemoteRingbackTone(long nativePtr, String file);
+	@Override
+	public void setRemoteRingbackTone(String file) {
+		setRemoteRingbackTone(nativePtr,file);
+	}
+	private native String getRemoteRingbackTone(long nativePtr);
+	@Override
+	public String getRemoteRingbackTone() {
+		return getRemoteRingbackTone(nativePtr);
+	}
+	
+	private native void uploadLogCollection(long nativePtr);
+	@Override
+	public void uploadLogCollection() {
+		uploadLogCollection(nativePtr);
+	}
+	
+	/**
+	 * Enable the linphone core log collection to upload logs on a server.
+	 */
+	public native static void enableLogCollection(boolean enable);
+
+	/**
+	 * Set the path where the log files will be written for log collection.
+	 * @param path The path where the log files will be written.
+	 */
+	public native static void setLogCollectionPath(String path);
+	
+	private native void setPreferredFramerate(long nativePtr, float fps);
+	@Override
+	public void setPreferredFramerate(float fps) {
+		setPreferredFramerate(nativePtr,fps);
+	}
+	private native float getPreferredFramerate(long nativePtr);
+	@Override
+	public float getPreferredFramerate() {
+		return getPreferredFramerate(nativePtr);
 	}
 }

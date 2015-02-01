@@ -50,7 +50,7 @@
 #include "svc_enc_slice_segment.h"
 #include "WelsThreadLib.h"
 
-namespace WelsSVCEnc {
+namespace WelsEnc {
 void UpdateMbListNeighborParallel (SSliceCtx* pSliceCtx,
                                    SMB* pMbList,
                                    const int32_t kiSliceIdc);
@@ -81,8 +81,8 @@ WELS_THREAD_ROUTINE_TYPE CodingSliceThreadProc (void* arg);
 
 int32_t CreateSliceThreads (sWelsEncCtx* pCtx);
 
-int32_t FiredSliceThreads (SSliceThreadPrivateData* pPriData, WELS_EVENT* pEventsList, WELS_EVENT* pMasterEventsList,
-                           SLayerBSInfo* pLayerBsInfo,
+int32_t FiredSliceThreads (sWelsEncCtx* pCtx, SSliceThreadPrivateData* pPriData, WELS_EVENT* pEventsList,
+                           WELS_EVENT* pMasterEventsList, SLayerBSInfo* pLayerBsInfo,
                            const uint32_t kuiNumThreads/*, int32_t *iLayerNum*/, SSliceCtx* pSliceCtx, const bool kbIsDynamicSlicingMode);
 
 int32_t DynamicDetectCpuCores();

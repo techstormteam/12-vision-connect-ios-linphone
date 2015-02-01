@@ -51,8 +51,14 @@ libmediastreamer_voip_la_LIBADD=	libmediastreamer_base.la \
 					$(LIBV4LCONVERT_LIBS) \
 					$(SPANDSP_LIBS) \
 					$(PCAP_LIBS) \
-					$(OPUS_LIBS)
+					$(OPUS_LIBS) \
+					$(SRTP_LIBS) \
+					$(POLARSSL_LIBS)
 
+
+if LIBBZRTP
+libmediastreamer_voip_la_LIBADD+=$(LIBBZRTP_LIB)
+endif
 
 lib_LTLIBRARIES=libmediastreamer_base.la
 if BUILD_VOIP_LIBRARY
@@ -93,7 +99,12 @@ libmediastreamer_voip_la_SOURCES+=	voip/private.h \
 					voip/audioconference.c \
 					voip/bitratedriver.c \
 					voip/qosanalyzer.c voip/qosanalyzer.h \
-					voip/bitratecontrol.c
+					voip/bitratecontrol.c \
+					crypto/zrtp.c \
+					voip/stun.c \
+					voip/stun_udp.c \
+					crypto/ms_srtp.c \
+					crypto/dtls_srtp.c
 else
 libmediastreamer_base_la_SOURCES+=	ortp-deps/logging.c \
 					ortp-deps/port.c \
@@ -131,7 +142,8 @@ libmediastreamer_voip_la_SOURCES+=	audiofilters/alaw.c \
 					audiofilters/msfileplayer.c \
 					audiofilters/msfilerec.c \
 					audiofilters/waveheader.h \
-					audiofilters/flowcontrol.c 
+					audiofilters/flowcontrol.c \
+					audiofilters/msvaddtx.c
 
 if BUILD_SPEEX
 libmediastreamer_voip_la_SOURCES+=	audiofilters/msspeex.c audiofilters/speexec.c
@@ -242,7 +254,8 @@ libmediastreamer_voip_la_SOURCES+=	videofilters/vp8.c
 endif
 
 if BUILD_MATROSKA
-libmediastreamer_voip_la_SOURCES+=	videofilters/mkv.c
+libmediastreamer_voip_la_SOURCES+=	videofilters/mkv.c \
+					utils/mkv_reader.c utils/mkv_reader.h
 endif
 
 if BUILD_AVCODEC
@@ -289,6 +302,7 @@ libmediastreamer_voip_la_SOURCES+=	voip/rfc2429.h \
 					videofilters/extdisplay.c \
 					utils/bits_rw.c \
 					utils/x11_helper.c \
+					utils/stream_regulator.c utils/stream_regulator.h \
 					voip/layouts.c voip/layouts.h
 
 if ORTP_ENABLED
@@ -377,7 +391,9 @@ AM_CFLAGS=\
 	$(SPANDSP_CFLAGS)  \
 	$(MSSILK_CFLAGS) \
 	$(PCAP_CFLAGS) \
-	$(OPUS_CFLAGS)
+	$(OPUS_CFLAGS) \
+	$(SRTP_CFLAGS) \
+	$(POLARSSL_CFLAGS)
 
 AM_CXXFLAGS=\
 	$(STRICT_OPTIONS) \
@@ -394,6 +410,9 @@ if BUILD_VIDEO
 AM_CFLAGS+=$(VIDEO_CFLAGS) $(GLEW_CFLAGS)
 endif
 
+if LIBBZRTP
+AM_CFLAGS+=$(LIBBZRTP_CFLAGS)
+endif
 
 if BUILD_WIN32
 libmediastreamer_voip_la_LIBADD+=       -lole32 \
@@ -465,3 +484,7 @@ yuv2rgb.fs.h: yuv2rgb.fs
 yuv2rgb.vs.h: yuv2rgb.vs
 	cd $(abs_srcdir) && \
 	xxd -i yuv2rgb.vs | sed s/}\;/,0x00}\;/ > $(abs_builddir)/yuv2rgb.vs.h
+
+#because make bundle serahc in this dir
+install-data-local:
+	$(MKDIR_P) $(DESTDIR)$(libdir)/mediastreamer/plugins

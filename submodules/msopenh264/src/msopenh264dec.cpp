@@ -53,9 +53,9 @@ void MSOpenH264Decoder::initialize()
 		mUnpacker=rfc3984_new();
 		if (mDecoder != 0) {
 			SDecodingParam params = { 0 };
-			params.iOutputColorFormat = videoFormatI420;
+			params.eOutputColorFormat = videoFormatI420;
 			params.uiTargetDqLayer = (unsigned char) -1;
-			params.uiEcActiveFlag = 1;
+			params.eEcActiveIdc = ERROR_CON_FRAME_COPY_CROSS_IDR;
 			params.sVideoProperty.size = sizeof(params.sVideoProperty);
 			params.sVideoProperty.eVideoBsType = VIDEO_BITSTREAM_DEFAULT;
 			long ret = mDecoder->Initialize(&params);
@@ -120,6 +120,7 @@ void MSOpenH264Decoder::feed()
 					mWidth = sDstBufInfo.UsrData.sSystemBuffer.iWidth;
 					mHeight = sDstBufInfo.UsrData.sSystemBuffer.iHeight;
 					mYUVMsg = ms_yuv_buf_alloc(&mOutbuf, mWidth, mHeight);
+					ms_filter_notify_no_arg(mFilter,MS_FILTER_OUTPUT_FMT_CHANGED);
 				}
 
 				// Scale/copy frame to destination mblk_t
@@ -211,6 +212,11 @@ MSVideoSize MSOpenH264Decoder::getSize() const
 
 float MSOpenH264Decoder::getFps()const{
 	return ms_average_fps_get(&mFPS);
+}
+
+const MSFmtDescriptor * MSOpenH264Decoder::getOutFmt()const{
+	MSVideoSize vsize={mWidth,mHeight};
+	return ms_factory_get_video_format(mFilter->factory,"YUV420P",vsize,0,NULL);
 }
 
 int MSOpenH264Decoder::nalusToFrame(MSQueue *nalus)

@@ -176,6 +176,10 @@ BELLESIP_EXPORT const char* belle_sip_version_to_string();
 **/
 BELLESIP_EXPORT char *belle_sip_unquote_strdup(const char *str);
 
+BELLESIP_EXPORT uint64_t belle_sip_time_ms(void);
+
+BELLESIP_EXPORT unsigned int belle_sip_random(void);
+
 #if defined(WIN32)
 
 #include <winsock2.h>
@@ -193,6 +197,9 @@ typedef int belle_sip_socket_t;
 typedef int belle_sip_fd_t;
 
 #endif
+
+BELLESIP_EXPORT int belle_sip_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
+BELLESIP_EXPORT void belle_sip_freeaddrinfo(struct addrinfo *res);
 
 BELLE_SIP_END_DECLS
 

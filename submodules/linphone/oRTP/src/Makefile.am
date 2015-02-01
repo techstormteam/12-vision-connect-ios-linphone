@@ -11,49 +11,42 @@ AM_CFLAGS=\
 	$(STRICT_OPTIONS) \
 	$(STRICT_OPTIONS_CC) \
 	$(PTHREAD_CFLAGS) \
-	$(TRUESPEECH_CFLAGS) \
-	$(SRTP_CFLAGS)
+	$(TRUESPEECH_CFLAGS)
 
 AM_LDFLAGS=$(PTHREAD_LDFLAGS)
 
 lib_LTLIBRARIES = libortp.la
 
-libortp_la_SOURCES=	str_utils.c 	\
-			port.c \
-			logging.c \
-			rtpparse.c  \
-			rtpsession.c \
-			rtpsession_inet.c \
-			rtpsession_priv.h \
-			jitterctl.c jitterctl.h \
-			rtpsignaltable.c  \
-			rtptimer.c	rtptimer.h \
-			posixtimer.c \
-			ortp.c \
-			scheduler.c scheduler.h \
+libortp_la_SOURCES=	\
 			avprofile.c  \
-			sessionset.c  \
-			telephonyevents.c  \
+			b64.c \
+			event.c \
+			extremum.c \
+			jitterctl.c jitterctl.h \
+			logging.c \
+			netsim.c \
+			ortp.c \
 			payloadtype.c \
-			rtpprofile.c \
+			port.c \
+			posixtimer.c \
 			rtcp.c \
 			rtcp_fb.c \
 			rtcp_xr.c \
-			utils.c utils.h \
 			rtcpparse.c \
-			event.c \
-			stun.c stun_udp.c \
-			ortp_srtp.c \
-			b64.c \
-			zrtp.c \
-			netsim.c
+			rtpparse.c  \
+			rtpprofile.c \
+			rtpsession.c \
+			rtpsession_inet.c \
+			rtpsession_priv.h \
+			rtpsignaltable.c  \
+			rtptimer.c	rtptimer.h \
+			scheduler.c scheduler.h \
+			sessionset.c  \
+			str_utils.c 	\
+			telephonyevents.c  \
+			utils.c utils.h
 
-if LIBBZRTP
-AM_CFLAGS+= $(LIBBZRTP_CFLAGS)
-AM_LDFLAGS+= $(LIBBZRTP_LDFLAGS)
-endif
-
-libortp_la_LIBADD= $(PTHREAD_LIBS) $(RT_LIBS) -lm $(SRTP_LIBS) $(SSL_LIBS) $(LIBBZRTP_LIBS)
+libortp_la_LIBADD= $(PTHREAD_LIBS) $(RT_LIBS) -lm $(SSL_LIBS)
 
 libortp_la_LDFLAGS= -version-info $(LIBORTP_SO_VERSION) -no-undefined
 

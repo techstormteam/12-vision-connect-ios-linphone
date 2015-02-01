@@ -54,6 +54,9 @@ extern test_suite_t audio_stream_test_suite;
 extern test_suite_t video_stream_test_suite;
 extern test_suite_t framework_test_suite;
 extern test_suite_t player_test_suite;
+#ifdef __ARM_NEON__
+extern test_suite_t neon_test_suite;
+#endif
 
 #define CU_ASSERT_IN_RANGE(value, inf, sup) \
 		CU_ASSERT_TRUE(value >= inf); \
@@ -66,6 +69,16 @@ extern const char * mediastreamer2_tester_test_name(const char *suite_name, int 
 extern void mediastreamer2_tester_init(void);
 extern void mediastreamer2_tester_uninit(void);
 extern int mediastreamer2_tester_run_tests(const char *suite_name, const char *test_name);
+
+extern const char* mediastreamer2_tester_get_file_root();
+/* without / at the end */
+extern void mediastreamer2_tester_set_file_root(const char* fileroot);
+extern const char* mediastreamer2_tester_get_writable_dir();
+extern void mediastreamer2_tester_set_writable_dir(const char* writable_dir);
+
+#if TARGET_OS_MAC || TARGET_OS_IPHONE
+    int apple_main(int argc, char *argv[]);
+#endif
 
 
 #ifdef __cplusplus

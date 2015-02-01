@@ -29,7 +29,6 @@
  *     POSSIBILITY OF SUCH DAMAGE.
  *
  *
- *  welsCodecTrace.h
  *
  *  Abstract
  *      Cisco OpenH264 encoder extension utilization interface for T26
@@ -39,8 +38,8 @@
  *
  *
  *************************************************************************/
-#if !defined(AFX_WELSH264ENCODER_H__D9FAA1D1_5403_47E1_8E27_78F11EE65F02__INCLUDED_)
-#define AFX_WELSH264ENCODER_H__D9FAA1D1_5403_47E1_8E27_78F11EE65F02__INCLUDED_
+#if !defined(WELS_PLUS_WELSENCODEREXT_H)
+#define WELS_PLUS_WELSENCODEREXT_H
 
 #include "codec_api.h"
 #include "codec_def.h"
@@ -56,7 +55,7 @@
 //#define REC_FRAME_COUNT
 
 class ISVCEncoder;
-namespace WelsSVCEnc {
+namespace WelsEnc {
 class CWelsH264SVCEncoder : public ISVCEncoder {
  public:
   CWelsH264SVCEncoder();
@@ -83,12 +82,6 @@ class CWelsH264SVCEncoder : public ISVCEncoder {
    * return: 0 - success; otherwise - failed;
    */
   virtual int EXTAPI EncodeParameterSets (SFrameBSInfo* pBsInfo);
-
-  /*
-   * return: 0 - success; otherwise - failed;
-   */
-  virtual int EXTAPI PauseFrame (const SSourcePicture* kpSrcPic, SFrameBSInfo* pBsInfo);
-
   /*
    * return: 0 - success; otherwise - failed;
    */
@@ -105,6 +98,11 @@ class CWelsH264SVCEncoder : public ISVCEncoder {
 
  private:
   int InitializeInternal (SWelsSvcCodingParam* argv);
+  void CheckProfileSetting (int32_t iLayer, EProfileIdc uiProfileIdc);
+  void CheckLevelSetting (int32_t iLayer, ELevelIdc uiLevelIdc);
+  void CheckReferenceNumSetting (int32_t iNumRef);
+  void TraceParamInfo(SEncParamExt *pParam);
+  void UpdateStatistics(const int64_t kiCurrentFrameTs, EVideoFrameType eFrameType,  const int32_t kiCurrentFrameSize, const int64_t kiCurrentFrameMs);
 
   sWelsEncCtx*	m_pEncContext;
 
@@ -130,4 +128,4 @@ class CWelsH264SVCEncoder : public ISVCEncoder {
   void    DumpSrcPicture (const uint8_t* pSrc);
 };
 }
-#endif // !defined(AFX_WELSH264ENCODER_H__D9FAA1D1_5403_47E1_8E27_78F11EE65F02__INCLUDED_)
+#endif // !defined(WELS_PLUS_WELSENCODEREXT_H)

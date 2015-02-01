@@ -25,8 +25,14 @@
 #include <polarssl/ssl.h>
 #include <polarssl/version.h>
 #include <polarssl/error.h>
+#include <polarssl/pem.h>
 #if POLARSSL_VERSION_NUMBER >= 0x01030000
 #include <polarssl/x509.h>
+#include <polarssl/entropy.h>
+#include <polarssl/ctr_drbg.h>
+#include <polarssl/sha1.h>
+#include <polarssl/sha256.h>
+#include <polarssl/sha512.h>
 #endif
 #endif
 
@@ -55,7 +61,44 @@ struct belle_sip_signing_key {
 
 #ifdef HAVE_POLARSSL
 
+/**
+ * Retrieve key or certificate in a string(PEM format)
+ */
+#if POLARSSL_VERSION_NUMBER < 0x01030000
+char *belle_sip_certificates_chain_get_pem(belle_sip_certificates_chain_t *cert) {
+	return NULL;
+}
+char *belle_sip_signing_key_get_pem(belle_sip_signing_key_t *key) {
+	return NULL;
+}
+#else /* POLARSSL_VERSION_NUMBER >= 0x01030000 */
+char *belle_sip_certificates_chain_get_pem(belle_sip_certificates_chain_t *cert) {
+	char *pem_certificate = NULL;
+	size_t olen=0;
+	if (cert == NULL) return NULL;
+
+	pem_certificate = (char*)belle_sip_malloc(4096);
+	pem_write_buffer("-----BEGIN CERTIFICATE-----\n", "-----END CERTIFICATE-----\n", cert->cert.raw.p, cert->cert.raw.len, (unsigned char*)pem_certificate, 4096, &olen );
+	return pem_certificate;
+}
+
+char *belle_sip_signing_key_get_pem(belle_sip_signing_key_t *key) {
+	char *pem_key;
+	if (key == NULL) return NULL;
+	pem_key = (char *)belle_sip_malloc(4096);
+	pk_write_key_pem( &(key->key), (unsigned char *)pem_key, 4096);
+	return pem_key;
+}
+#endif /* POLARSSL_VERSION_NUMBER >= 0x01030000 */
+
 /*************tls********/
+// SSL verification callback prototype
+// der - raw certificate data, in DER format
+// length - length of certificate DER data
+// depth - position of certificate in cert chain, ending at 0 = root or top
+// flags - verification state for CURRENT certificate only
+typedef int (*verify_cb_error_cb_t)(unsigned char* der, int length, int depth, int* flags);
+static verify_cb_error_cb_t tls_verify_cb_error_cb = NULL;
 
 static int tls_process_data(belle_sip_channel_t *obj,unsigned int revents);
 
@@ -315,6 +358,68 @@ static const char *polarssl_certflags_to_string(char *buf, size_t size, int flag
 	return buf;
 }
 
+// shim the default PolarSSL certificate handling by adding an external callback
+// see "verify_cb_error_cb_t" for the function signature
+int belle_sip_tls_set_verify_error_cb(void * callback)
+{
+	if (callback) {
+        tls_verify_cb_error_cb = (verify_cb_error_cb_t)callback;
+		belle_sip_message("belle_sip_tls_set_verify_error_cb: callback set");
+	} else {
+        tls_verify_cb_error_cb = NULL;
+		belle_sip_message("belle_sip_tls_set_verify_error_cb: callback cleared");
+	}
+	return 0;
+}
+
+//
+// Augment certificate verification with certificates stored outside rootca.pem
+// PolarSSL calls the verify_cb with each cert in the chain; flags apply to the
+// current certificate until depth is 0;
+//
+// NOTES:
+// 1) rootca.pem *must* have at least one valid certificate, or PolarSSL
+// does not attempt to verify any certificates
+// 2) callback must return 0; non-zero indicates that the verification process failed
+// 3) flags should be saved off and cleared for each certificate where depth>0
+// 4) return final verification result in *flags when depth == 0
+// 5) callback must disable calls to linphone_core_iterate while running
+//
+
+#if POLARSSL_VERSION_NUMBER < 0x01030000
+int belle_sip_verify_cb_error_wrapper(x509_cert *cert, int depth, int *flags){
+#else
+int belle_sip_verify_cb_error_wrapper(x509_crt *cert, int depth, int *flags){
+#endif
+	int rc = 0;
+	unsigned char *der = NULL;
+
+	// do nothing if the callback is not set
+	if (!tls_verify_cb_error_cb) {
+		return 0;
+	}
+
+	belle_sip_message("belle_sip_verify_cb_error_wrapper: depth=[%d], flags=[%d]:\n", depth, *flags);
+
+	der = belle_sip_malloc(cert->raw.len + 1);
+	if (der == NULL) {
+		// leave the flags alone and just return to the library
+		belle_sip_error("belle_sip_verify_cb_error_wrapper: memory error\n");
+		return 0;
+	}
+
+	// copy in and NULL terminate again for safety
+	memcpy(der, cert->raw.p, cert->raw.len);
+	der[cert->raw.len] = '\0';
+
+    rc = tls_verify_cb_error_cb(der, cert->raw.len, depth, flags);
+
+	belle_sip_message("belle_sip_verify_cb_error_wrapper: callback return rc: %d, flags: %d", rc, *flags);
+	belle_sip_free(der);
+	return rc;
+}
+
+
 #if POLARSSL_VERSION_NUMBER < 0x01030000
 static int belle_sip_ssl_verify(void *data , x509_cert *cert , int depth, int *flags){
 #else
@@ -336,7 +441,8 @@ static int belle_sip_ssl_verify(void *data , x509_crt *cert , int depth, int *fl
 	}else if (verify_ctx->exception_flags & BELLE_TLS_VERIFY_CN_MISMATCH){
 		*flags&=~BADCERT_CN_MISMATCH;
 	}
-	return 0;
+
+	return belle_sip_verify_cb_error_wrapper(cert, depth, flags);
 }
 
 static int belle_sip_tls_channel_load_root_ca(belle_sip_tls_channel_t *obj, const char *path){
@@ -429,12 +535,18 @@ void belle_sip_tls_channel_set_client_certificate_key(belle_sip_tls_channel_t *c
 }
 
 
-#else /*HAVE_POLLAR_SSL*/
+#else /*HAVE_POLARSSL*/
 void belle_sip_tls_channel_set_client_certificates_chain(belle_sip_tls_channel_t *obj, belle_sip_certificates_chain_t* cert_chain) {
 	belle_sip_error("belle_sip_channel_set_client_certificate_chain requires TLS");
 }
 void belle_sip_tls_channel_set_client_certificate_key(belle_sip_tls_channel_t *obj, belle_sip_signing_key_t* key) {
 	belle_sip_error("belle_sip_channel_set_client_certificate_key requires TLS");
+}
+unsigned char *belle_sip_get_certificates_pem(belle_sip_certificates_chain_t *cert) {
+	return NULL;
+}
+unsigned char *belle_sip_get_key_pem(belle_sip_signing_key_t *key) {
+	return NULL;
 }
 #endif
 
@@ -506,6 +618,271 @@ belle_sip_certificates_chain_t* belle_sip_certificates_chain_parse_file(const ch
 	return certificate;
 }
 
+
+/*
+ * Parse all *.pem files in a given dir(non recursively) and return the one matching the given subject
+ */
+int belle_sip_get_certificate_and_pkey_in_dir(const char *path, const char *subject, belle_sip_certificates_chain_t **certificate, belle_sip_signing_key_t **pkey, belle_sip_certificate_raw_format_t format) {
+#ifdef HAVE_POLARSSL
+#if POLARSSL_VERSION_NUMBER < 0x01030000
+	return -1;
+#else /* POLARSSL_VERSION_NUMBER > 0x01030000 */
+	/* get all *.pem file from given path */
+	belle_sip_list_t *file_list = belle_sip_parse_directory(path, ".pem");
+	char *filename = NULL;
+
+	file_list = belle_sip_list_pop_front(file_list, (void **)&filename);
+	while (filename != NULL) {
+		belle_sip_certificates_chain_t *found_certificate = belle_sip_certificates_chain_parse_file(filename, format);
+		if (found_certificate != NULL) { /* there is a certificate in this file */
+			char *subject_CNAME_begin, *subject_CNAME_end;
+			belle_sip_signing_key_t *found_key;
+			char name[500];
+			memset( name, 0, sizeof(name) );
+			x509_dn_gets( name, sizeof(name), &(found_certificate->cert.subject)); /* this function is available only in polarssl version >=1.3 */
+			/* parse subject to find the CN=xxx, field. There may be no , at the and but a \0 */
+			subject_CNAME_begin = strstr(name, "CN=");
+			if (subject_CNAME_begin!=NULL) {
+				subject_CNAME_begin+=3;
+				subject_CNAME_end = strstr(subject_CNAME_begin, ",");
+				if (subject_CNAME_end != NULL) {
+					*subject_CNAME_end = '\0';
+				}
+				if (strcmp(subject_CNAME_begin, subject)==0) { /* subject CNAME match the one we are looking for*/
+					/* do we have a key too ? */
+					found_key = belle_sip_signing_key_parse_file(filename, NULL);
+					if (found_key!=NULL) {
+						*certificate = found_certificate;
+						*pkey = found_key;
+						belle_sip_free(filename);
+						belle_sip_list_free_with_data(file_list, belle_sip_free); /* free possible rest of list */
+						return 0;
+					}
+				}
+			}
+		}
+		belle_sip_free(filename);
+		file_list = belle_sip_list_pop_front(file_list, (void **)&filename);
+	}
+	return -1;
+#endif /* POLARSSL_VERSION_NUMBER >= 0x01030000 */
+#else /* ! HAVE_POLARSSL */
+	return -1;
+#endif
+}
+
+int belle_sip_generate_self_signed_certificate(const char* path, const char *subject, belle_sip_certificates_chain_t **certificate, belle_sip_signing_key_t **pkey) {
+#ifdef HAVE_POLARSSL
+#if POLARSSL_VERSION_NUMBER < 0x01030000
+	return -1;
+#else /* POLARSSL_VERSION_NUMBER < 0x01030000 */
+	entropy_context entropy;
+	ctr_drbg_context ctr_drbg;
+	int ret;
+	mpi serial;
+	x509write_cert crt;
+	FILE *fd;
+	char file_buffer[8192];
+	size_t file_buffer_len = 0;
+	char *name_with_path;
+	int path_length;
+	char formatted_subject[512];
+
+	/* subject may be a sip URL or linphone-dtls-default-identity, add CN= before it to make a valid name */
+	memcpy(formatted_subject, "CN=", 3);
+	memcpy(formatted_subject+3, subject, strlen(subject)+1); /* +1 to get the \0 termination */
+
+	/* allocate certificate and key */
+	*pkey = belle_sip_object_new(belle_sip_signing_key_t);
+	*certificate = belle_sip_object_new(belle_sip_certificates_chain_t);
+
+	entropy_init( &entropy );
+	if( ( ret = ctr_drbg_init( &ctr_drbg, entropy_func, &entropy, NULL, 0 ) )   != 0 )
+	{
+		belle_sip_error("Certificate generation can't init ctr_drbg: -%x", -ret);
+		return -1;
+	}
+
+	/* generate 3072 bits RSA public/private key */
+	pk_init( &((*pkey)->key) );
+	if ( (ret = pk_init_ctx( &((*pkey)->key), pk_info_from_type( POLARSSL_PK_RSA ) )) != 0) {
+		belle_sip_error("Certificate generation can't init pk_ctx: -%x", -ret);
+		return -1;
+	}
+	if ( ( ret = rsa_gen_key( pk_rsa( (*pkey)->key ), ctr_drbg_random, &ctr_drbg, 3072, 65537 ) ) != 0) {
+		belle_sip_error("Certificate generation can't generate rsa key: -%x", -ret);
+		return -1;
+	}
+
+	/* if there is no path, don't write a file */
+	if (path!=NULL) {
+		pk_write_key_pem( &((*pkey)->key), (unsigned char *)file_buffer, 4096);
+		file_buffer_len = strlen(file_buffer);
+	}
+
+	/* generate the certificate */
+	x509write_crt_init( &crt );
+	x509write_crt_set_md_alg( &crt, POLARSSL_MD_SHA256 );
+
+	mpi_init( &serial );
+
+	if ( (ret = mpi_read_string( &serial, 10, "1" ) ) != 0 ) {
+		belle_sip_error("Certificate generation can't read serial mpi: -%x", -ret);
+		return -1;
+	}
+
+	x509write_crt_set_subject_key( &crt, &((*pkey)->key) );
+	x509write_crt_set_issuer_key( &crt, &((*pkey)->key) );
+
+	if ( (ret = x509write_crt_set_subject_name( &crt, formatted_subject) ) != 0) {
+		belle_sip_error("Certificate generation can't set subject name: -%x", -ret);
+		return -1;
+	}
+
+	if ( (ret = x509write_crt_set_issuer_name( &crt, formatted_subject) ) != 0) {
+		belle_sip_error("Certificate generation can't set issuer name: -%x", -ret);
+		return -1;
+	}
+
+	if ( (ret = x509write_crt_set_serial( &crt, &serial ) ) != 0) {
+		belle_sip_error("Certificate generation can't set serial: -%x", -ret);
+		return -1;
+	}
+	mpi_free(&serial);
+
+	if ( (ret = x509write_crt_set_validity( &crt, "20010101000000", "20300101000000" ) ) != 0) {
+		belle_sip_error("Certificate generation can't set validity: -%x", -ret);
+		return -1;
+	}
+
+	/* store anyway certificate in pem format in a string even if we do not have file to write as we need it to get it in a x509_crt structure */
+	if ( (ret = x509write_crt_pem( &crt, (unsigned char *)file_buffer+file_buffer_len, 4096, ctr_drbg_random, &ctr_drbg ) ) != 0) {
+		belle_sip_error("Certificate generation can't write crt pem: -%x", -ret);
+		return -1;
+	}
+
+	x509write_crt_free(&crt);
+
+	if ( (ret = x509_crt_parse(&((*certificate)->cert), (unsigned char *)file_buffer, strlen(file_buffer)) ) != 0) {
+		belle_sip_error("Certificate generation can't parse crt pem: -%x", -ret);
+		return -1;
+	}
+
+	/* write the file if needed */
+	if (path!=NULL) {
+		name_with_path = (char *)belle_sip_malloc(strlen(path)+257); /* max filename is 256 bytes in dirent structure, +1 for / */
+		path_length = strlen(path);
+		memcpy(name_with_path, path, path_length);
+		name_with_path[path_length] = '/';
+		path_length++;
+		memcpy(name_with_path+path_length, subject, strlen(subject));
+		memcpy(name_with_path+path_length+strlen(subject), ".pem", 5);
+
+		/* check if directory exists and if not, create it */
+		belle_sip_mkdir(path);
+
+		if ( (fd = fopen(name_with_path, "w") ) == NULL) {
+			belle_sip_error("Certificate generation can't open/create file %s", name_with_path);
+			free(name_with_path);
+			belle_sip_object_unref(*pkey);
+			belle_sip_object_unref(*certificate);
+			*pkey = NULL;
+			*certificate = NULL;
+			return -1;
+		}
+		if ( fwrite(file_buffer, 1, strlen(file_buffer), fd) != strlen(file_buffer) ) {
+			belle_sip_error("Certificate generation can't write into file %s", name_with_path);
+			fclose(fd);
+			belle_sip_object_unref(*pkey);
+			belle_sip_object_unref(*certificate);
+			*pkey = NULL;
+			*certificate = NULL;
+			free(name_with_path);
+			return -1;
+		}
+		fclose(fd);
+		free(name_with_path);
+	}
+
+	return 0;
+#endif /* else POLARSSL_VERSION_NUMBER < 0x01030000 */
+#else /* ! HAVE_POLARSSL */
+	return -1;
+#endif
+}
+
+/* Note : this code is duplicated in mediastreamer2/src/voip/dtls_srtp.c but get directly a x509_crt as input parameter */
+char *belle_sip_certificates_chain_get_fingerprint(belle_sip_certificates_chain_t *certificate) {
+#ifdef HAVE_POLARSSL
+#if POLARSSL_VERSION_NUMBER < 0x01030000
+	return NULL;
+#else /* POLARSSL_VERSION_NUMBER < 0x01030000 */
+	unsigned char buffer[64]={0}; /* buffer is max length of returned hash, which is 64 in case we use sha-512 */
+	size_t hash_length = 0;
+	const char *hash_alg_string=NULL;
+	char *fingerprint = NULL;
+	x509_crt *crt;
+	if (certificate == NULL) return NULL;
+
+	crt = &certificate->cert;
+	/* fingerprint is a hash of the DER formated certificate (found in crt->raw.p) using the same hash function used by certificate signature */
+	switch (crt->sig_md) {
+		case POLARSSL_MD_SHA1:
+			sha1(crt->raw.p, crt->raw.len, buffer);
+			hash_length = 20;
+			hash_alg_string="SHA-1";
+		break;
+
+		case POLARSSL_MD_SHA224:
+			sha256(crt->raw.p, crt->raw.len, buffer, 1); /* last argument is a boolean, indicate to output sha-224 and not sha-256 */
+			hash_length = 28;
+			hash_alg_string="SHA-224";
+		break;
+
+		case POLARSSL_MD_SHA256:
+			sha256(crt->raw.p, crt->raw.len, buffer, 0);
+			hash_length = 32;
+			hash_alg_string="SHA-256";
+		break;
+
+		case POLARSSL_MD_SHA384:
+			sha512(crt->raw.p, crt->raw.len, buffer, 1); /* last argument is a boolean, indicate to output sha-384 and not sha-512 */
+			hash_length = 48;
+			hash_alg_string="SHA-384";
+		break;
+
+		case POLARSSL_MD_SHA512:
+			sha512(crt->raw.p, crt->raw.len, buffer, 1); /* last argument is a boolean, indicate to output sha-384 and not sha-512 */
+			hash_length = 64;
+			hash_alg_string="SHA-512";
+		break;
+
+		default:
+			return NULL;
+		break;
+	}
+
+	if (hash_length>0) {
+		int i;
+		int fingerprint_index = strlen(hash_alg_string);
+		size_t size=fingerprint_index+3*hash_length+1;
+		char prefix=' ';
+		/* fingerprint will be : hash_alg_string+' '+HEX : separated values: length is strlen(hash_alg_string)+3*hash_lenght + 1 for null termination */
+		fingerprint = belle_sip_malloc0(size);
+		snprintf(fingerprint, size, "%s", hash_alg_string);
+		for (i=0; i<hash_length; i++, fingerprint_index+=3) {
+			snprintf((char*)fingerprint+fingerprint_index, size-fingerprint_index, "%c%02X", prefix,buffer[i]);
+			prefix=':';
+		}
+		*(fingerprint+fingerprint_index) = '\0';
+	}
+
+	return fingerprint;
+#endif /* else POLARSSL_VERSION_NUMBER < 0x01030000 */
+#else /* ! HAVE_POLARSSL */
+	return NULL;
+#endif
+}
 
 static void belle_sip_certificates_chain_destroy(belle_sip_certificates_chain_t *certificate){
 #ifdef HAVE_POLARSSL

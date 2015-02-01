@@ -31,7 +31,49 @@ static bool_t only_telephone_event(const MSList *l){
 	return TRUE;
 }
 
-static PayloadType * find_payload_type_best_match(const MSList *l, const PayloadType *refpt){
+typedef struct _PayloadTypeMatcher{
+	const char *mime_type;
+	PayloadType *(*match_func)(const MSList *l, const PayloadType *refpt);
+}PayloadTypeMatcher;
+
+static PayloadType * opus_match(const MSList *l, const PayloadType *refpt){
+	PayloadType *pt;
+	const MSList *elem;
+	PayloadType *candidate=NULL;
+
+	for (elem=l;elem!=NULL;elem=elem->next){
+		pt=(PayloadType*)elem->data;
+		
+		/*workaround a bug in earlier versions of linphone where opus/48000/1 is offered, which is uncompliant with opus rtp draft*/
+		if (strcasecmp(pt->mime_type,"opus")==0 ){
+			if (refpt->channels==1){
+				pt->channels=1; /*so that we respond with same number of channels */
+				candidate=pt;
+			}else if (refpt->channels==2){
+				return pt;
+			}
+		}
+	}
+	return candidate;
+}
+
+/* the reason for this matcher is for some stupid uncompliant phone that offer G729a mime type !*/
+static PayloadType * g729A_match(const MSList *l, const PayloadType *refpt){
+	PayloadType *pt;
+	const MSList *elem;
+	PayloadType *candidate=NULL;
+
+	for (elem=l;elem!=NULL;elem=elem->next){
+		pt=(PayloadType*)elem->data;
+		
+		if (strcasecmp(pt->mime_type,"G729")==0 && refpt->channels==pt->channels){
+			candidate=pt;
+		}
+	}
+	return candidate;
+}
+
+static PayloadType * amr_match(const MSList *l, const PayloadType *refpt){
 	PayloadType *pt;
 	char value[10];
 	const MSList *elem;
@@ -40,38 +82,62 @@ static PayloadType * find_payload_type_best_match(const MSList *l, const Payload
 	for (elem=l;elem!=NULL;elem=elem->next){
 		pt=(PayloadType*)elem->data;
 		
-		/*workaround a bug in earlier versions of linphone where opus/48000/1 is offered, which is uncompliant with opus rtp draft*/
-		if (refpt->mime_type && strcasecmp(refpt->mime_type,"opus")==0 && refpt->channels==1
-			&& strcasecmp(pt->mime_type,refpt->mime_type)==0){
-			pt->channels=1; /*so that we respond with same number of channels */
-			candidate=pt;
-			break;
-		}
-		
-		/* the compare between G729 and G729A is for some stupid uncompliant phone*/
-		if ( pt->mime_type && refpt->mime_type &&
-			(strcasecmp(pt->mime_type,refpt->mime_type)==0  ||
-			(strcasecmp(pt->mime_type, "G729") == 0 && strcasecmp(refpt->mime_type, "G729A") == 0 ))
-			&& pt->clock_rate==refpt->clock_rate && pt->channels==refpt->channels){
-			candidate=pt;
-			/*good candidate, check fmtp for H264 */
-			if (strcasecmp(pt->mime_type,"H264")==0){
-				if (pt->recv_fmtp!=NULL && refpt->recv_fmtp!=NULL){
-					int mode1=0,mode2=0;
-					if (fmtp_get_value(pt->recv_fmtp,"packetization-mode",value,sizeof(value))){
-						mode1=atoi(value);
-					}
-					if (fmtp_get_value(refpt->recv_fmtp,"packetization-mode",value,sizeof(value))){
-						mode2=atoi(value);
-					}
-					if (mode1==mode2)
-						break; /*exact match */
-				}
-			}else break;
+		if ( pt->mime_type && refpt->mime_type 
+			&& strcasecmp(pt->mime_type, refpt->mime_type)==0
+			&& pt->clock_rate==refpt->clock_rate
+			&& pt->channels==refpt->channels) {
+			int octedalign1=0,octedalign2=0;
+			if (pt->recv_fmtp!=NULL && fmtp_get_value(pt->recv_fmtp,"octet-align",value,sizeof(value))){
+				octedalign1=atoi(value);
+			}
+			if (refpt->send_fmtp!=NULL && fmtp_get_value(refpt->send_fmtp,"octet-align",value,sizeof(value))){
+				octedalign2=atoi(value);
+			}
+			if (octedalign1==octedalign2) {
+				candidate=pt;
+				break; /*exact match */
+			}
 		}
 	}
 	return candidate;
 }
+
+static PayloadType * generic_match(const MSList *l, const PayloadType *refpt){
+	PayloadType *pt;
+	const MSList *elem;
+
+	for (elem=l;elem!=NULL;elem=elem->next){
+		pt=(PayloadType*)elem->data;
+		
+		if ( pt->mime_type && refpt->mime_type 
+			&& strcasecmp(pt->mime_type, refpt->mime_type)==0
+			&& pt->clock_rate==refpt->clock_rate
+			&& pt->channels==refpt->channels)
+			return pt;
+	}
+	return NULL;
+}
+
+static PayloadTypeMatcher matchers[]={
+	{"opus", opus_match},
+	{"G729A", g729A_match},
+	{"AMR", amr_match},
+	{"AMR-WB", amr_match},
+	{NULL, NULL}
+};
+
+
+
+static PayloadType * find_payload_type_best_match(const MSList *l, const PayloadType *refpt){
+	PayloadTypeMatcher *m;
+	for(m=matchers;m->mime_type!=NULL;++m){
+		if (refpt->mime_type && strcasecmp(m->mime_type,refpt->mime_type)==0){
+			return m->match_func(l,refpt);
+		}
+	}
+	return generic_match(l,refpt);
+}
+
 
 static MSList *match_payloads(const MSList *local, const MSList *remote, bool_t reading_response, bool_t one_matching_codec){
 	const MSList *e2,*e1;
@@ -110,6 +176,7 @@ static MSList *match_payloads(const MSList *local, const MSList *remote, bool_t 
 			res=ms_list_append(res,newp);
 			/* we should use the remote numbering even when parsing a response */
 			payload_type_set_number(newp,remote_number);
+			payload_type_set_flag(newp, PAYLOAD_TYPE_FROZEN_NUMBER);
 			if (reading_response && remote_number!=local_number){
 				ms_warning("For payload type %s, proposed number was %i but the remote phone answered %i",
 						  newp->mime_type, local_number, remote_number);
@@ -120,6 +187,7 @@ static MSList *match_payloads(const MSList *local, const MSList *remote, bool_t 
 				*/
 				newp=payload_type_clone(newp);
 				payload_type_set_number(newp,local_number);
+				payload_type_set_flag(newp, PAYLOAD_TYPE_FROZEN_NUMBER);
 				res=ms_list_append(res,newp);
 			}
 		}else{
@@ -143,7 +211,8 @@ static MSList *match_payloads(const MSList *local, const MSList *remote, bool_t 
 			if (!found){
 				ms_message("Adding %s/%i for compatibility, just in case.",p1->mime_type,p1->clock_rate);
 				p1=payload_type_clone(p1);
-				p1->flags|=PAYLOAD_TYPE_FLAG_CAN_RECV;
+				payload_type_set_flag(p1, PAYLOAD_TYPE_FLAG_CAN_RECV);
+				payload_type_set_flag(p1, PAYLOAD_TYPE_FROZEN_NUMBER);
 				res=ms_list_append(res,p1);
 			}
 		}
@@ -247,6 +316,9 @@ static void initiate_outgoing(const SalStreamDescription *local_offer,
 		if (!match_crypto_algo(local_offer->crypto, remote_answer->crypto, &result->crypto[0], &result->crypto_local_tag, FALSE))
 			result->rtp_port = 0;
 	}
+	result->rtp_ssrc=local_offer->rtp_ssrc;
+	strncpy(result->rtcp_cname,local_offer->rtcp_cname,sizeof(result->rtcp_cname));
+
 }
 
 
@@ -281,6 +353,9 @@ static void initiate_incoming(const SalStreamDescription *local_cap,
 	memcpy(result->ice_candidates, local_cap->ice_candidates, sizeof(result->ice_candidates));
 	memcpy(result->ice_remote_candidates, local_cap->ice_remote_candidates, sizeof(result->ice_remote_candidates));
 	strcpy(result->name,local_cap->name);
+	result->rtp_ssrc=local_cap->rtp_ssrc;
+	strncpy(result->rtcp_cname,local_cap->rtcp_cname,sizeof(result->rtcp_cname));
+
 }
 
 /**
@@ -315,6 +390,21 @@ int offer_answer_initiate_outgoing(const SalMediaDescription *local_offer,
 		result->rtcp_xr.enabled = FALSE;
 	}
 
+	// Handle dtls session attribute: if both local and remote have a dtls fingerprint and a dtls setup, get the remote fingerprint into the result
+	if ((local_offer->dtls_role!=SalDtlsRoleInvalid) && (remote_answer->dtls_role!=SalDtlsRoleInvalid)
+			&&(strlen(local_offer->dtls_fingerprint)>0) && (strlen(remote_answer->dtls_fingerprint)>0)) {
+		strcpy(result->dtls_fingerprint, remote_answer->dtls_fingerprint);
+		if (remote_answer->dtls_role==SalDtlsRoleIsClient) {
+			result->dtls_role = SalDtlsRoleIsServer;
+		} else {
+			result->dtls_role = SalDtlsRoleIsClient;
+		}
+	} else {
+		result->dtls_fingerprint[0] = '\0';
+		result->dtls_role = SalDtlsRoleInvalid;
+	}
+
+
 	return 0;
 }
 
@@ -334,7 +424,9 @@ static bool_t local_stream_not_already_used(const SalMediaDescription *result, c
 static bool_t proto_compatible(SalMediaProto local, SalMediaProto remote) {
 	if (local == remote) return TRUE;
 	if ((remote == SalProtoRtpAvp) && ((local == SalProtoRtpSavp) || (local == SalProtoRtpSavpf))) return TRUE;
+	if ((remote == SalProtoRtpAvp) && ((local == SalProtoUdpTlsRtpSavp) || (local == SalProtoUdpTlsRtpSavpf))) return TRUE;
 	if ((remote == SalProtoRtpAvpf) && (local == SalProtoRtpSavpf)) return TRUE;
+	if ((remote == SalProtoRtpAvpf) && (local == SalProtoUdpTlsRtpSavpf)) return TRUE;
 	return FALSE;
 }
 
@@ -367,6 +459,23 @@ int offer_answer_initiate_incoming(const SalMediaDescription *local_capabilities
 		}else ms_warning("Unknown protocol for mline %i, declining",i);
 		if (ls){
 			initiate_incoming(ls,rs,&result->streams[i],one_matching_codec);
+
+			// Handle dtls stream attribute: if both local and remote have a dtls fingerprint and a dtls setup, add the local fingerprint to the answer
+			// Note: local description usually stores dtls config at session level which means it apply to all streams, check this too
+			if (((ls->dtls_role!=SalDtlsRoleInvalid) || (local_capabilities->dtls_role!=SalDtlsRoleInvalid)) && (rs->dtls_role!=SalDtlsRoleInvalid)
+					&& ((strlen(ls->dtls_fingerprint)>0) || (strlen(local_capabilities->dtls_fingerprint)>0)) && (strlen(rs->dtls_fingerprint)>0)) {
+				if (strlen(ls->dtls_fingerprint)>0) { /* get the fingerprint in stream description */
+					strcpy(result->streams[i].dtls_fingerprint, ls->dtls_fingerprint);
+				} else { /* get the fingerprint in session description */
+					strcpy(result->streams[i].dtls_fingerprint, local_capabilities->dtls_fingerprint);
+				}
+				if (rs->dtls_role==SalDtlsRoleUnset) {
+					result->streams[i].dtls_role = SalDtlsRoleIsClient;
+				}
+			} else {
+				result->streams[i].dtls_fingerprint[0] = '\0';
+				result->streams[i].dtls_role = SalDtlsRoleInvalid;
+			}
 
 			// Handle media RTCP XR attribute
 			memset(&result->streams[i].rtcp_xr, 0, sizeof(result->streams[i].rtcp_xr));
@@ -407,6 +516,18 @@ int offer_answer_initiate_incoming(const SalMediaDescription *local_capabilities
 	result->ice_completed = local_capabilities->ice_completed;
 
 	strcpy(result->name,local_capabilities->name);
+
+	// Handle dtls session attribute: if both local and remote have a dtls fingerprint and a dtls setup, add the local fingerprint to the answer
+	if ((local_capabilities->dtls_role!=SalDtlsRoleInvalid) && (remote_offer->dtls_role!=SalDtlsRoleInvalid)
+			&&(strlen(local_capabilities->dtls_fingerprint)>0) && (strlen(remote_offer->dtls_fingerprint)>0)) {
+		strcpy(result->dtls_fingerprint, local_capabilities->dtls_fingerprint);
+		if (remote_offer->dtls_role==SalDtlsRoleUnset) {
+			result->dtls_role = SalDtlsRoleIsClient;
+		}
+	} else {
+		result->dtls_fingerprint[0] = '\0';
+		result->dtls_role = SalDtlsRoleInvalid;
+	}
 
 	// Handle session RTCP XR attribute
 	memset(&result->rtcp_xr, 0, sizeof(result->rtcp_xr));

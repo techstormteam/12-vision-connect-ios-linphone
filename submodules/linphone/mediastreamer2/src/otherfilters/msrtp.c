@@ -26,7 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define B64_NO_NAMESPACE
 #endif
 #include "ortp/b64.h"
-#include "ortp/stun.h"
+#include "mediastreamer2/stun.h"
 
 static const int default_dtmf_duration_ms=100; /*in milliseconds*/
 
@@ -45,9 +45,10 @@ struct SenderData {
 	int relay_session_id_size;
 	uint64_t last_rsi_time;
 	char dtmf;
+	MSCngData cng_data;
 	bool_t dtmf_start;
 	bool_t skip;
-	bool_t mute_mic;
+	bool_t mute;
 	bool_t use_task;
 };
 
@@ -60,7 +61,10 @@ static void send_stun_packet(RtpSession *s)
 	mblk_t *mp;
 	char buf[STUN_MAX_MESSAGE_SIZE];
 	int len = STUN_MAX_MESSAGE_SIZE;
-
+	if (ms_is_multicast_addr((const struct sockaddr *)&s->rtcp.gs.loc_addr)) {
+		ms_debug("Stun packet not sent for session [%p] because of multicast",s);
+		return;
+	}
 	memset(&msg, 0, sizeof(StunMessage));
 	stunBuildReqSimple(&msg, NULL, FALSE, FALSE, 1);
 	len = stunEncodeMessage(&msg, buf, len, NULL);
@@ -85,7 +89,7 @@ static void sender_init(MSFilter * f)
 	d->dtmf = 0;
 	d->dtmf_duration = 800;
 	d->dtmf_ts_step=160;
-	d->mute_mic=FALSE;
+	d->mute=FALSE;
 	d->relay_session_id_size=0;
 	d->last_rsi_time=0;
 	d->last_sent_time=-1;
@@ -146,20 +150,20 @@ static int sender_set_session(MSFilter * f, void *arg)
 	return 0;
 }
 
-static int sender_mute_mic(MSFilter * f, void *arg)
+static int sender_mute(MSFilter * f, void *arg)
 {
 	SenderData *d = (SenderData *) f->data;
 	ms_filter_lock(f);
-	d->mute_mic=TRUE;
+	d->mute=TRUE;
 	ms_filter_unlock(f);
 	return 0;
 }
 
-static int sender_unmute_mic(MSFilter * f, void *arg)
+static int sender_unmute(MSFilter * f, void *arg)
 {
 	SenderData *d = (SenderData *) f->data;
 	ms_filter_lock(f);
-	d->mute_mic=FALSE;
+	d->mute=FALSE;
 	ms_filter_unlock(f);
 	return 0;
 }
@@ -209,8 +213,7 @@ static int sender_get_ch(MSFilter *f, void *arg) {
 }
 
 /* the goal of that function is to return a absolute timestamp closest to real time, with respect of given packet_ts, which is a relative to an undefined origin*/
-static uint32_t get_cur_timestamp(MSFilter * f, mblk_t *im)
-{
+static uint32_t get_cur_timestamp(MSFilter * f, mblk_t *im){
 	SenderData *d = (SenderData *) f->data;
 	uint32_t curts = (uint32_t)( (f->ticker->time*(uint64_t)d->rate)/(uint64_t)1000) ;
 	int diffts;
@@ -288,7 +291,6 @@ static int send_dtmf(MSFilter * f, uint32_t timestamp_start)
 		  tev_type=TEV_DTMF_A;
 		  break;
 
-
 		case 'B':
 		case 'b':
 		  tev_type=TEV_DTMF_B;
@@ -344,6 +346,26 @@ static int send_dtmf(MSFilter * f, uint32_t timestamp_start)
 	return 0;
 }
 
+static void check_stun_sending(MSFilter *f) {
+	SenderData *d = (SenderData *) f->data;
+	RtpSession *s = d->session;
+
+	if ((d->last_stun_sent_time == -1) || ((f->ticker->time - d->last_stun_sent_time) >= 500)) {
+		d->last_stun_sent_time = f->ticker->time;
+	}
+	if (d->last_stun_sent_time == f->ticker->time) {
+		send_stun_packet(s);
+	}
+}
+
+static void process_cn(MSFilter *f, SenderData *d){
+	if (d->cng_data.datasize>0){
+		mblk_t *m=rtp_session_create_packet(d->session, 12, d->cng_data.data, d->cng_data.datasize);
+		rtp_session_sendm_with_ts(d->session,m,d->last_ts);
+		d->cng_data.datasize=0;
+	}
+}
+
 static void _sender_process(MSFilter * f)
 {
 	SenderData *d = (SenderData *) f->data;
@@ -380,11 +402,17 @@ static void _sender_process(MSFilter * f)
 			}
 		}
 		if (im){
-			if (d->skip == FALSE && d->mute_mic==FALSE){
+			if (d->skip == FALSE && d->mute==FALSE){
 				header = rtp_session_create_packet(s, 12, NULL, 0);
 				rtp_set_markbit(header, mblk_get_marker_info(im));
 				header->b_cont = im;
 				rtp_session_sendm_with_ts(s, header, timestamp);
+			} else if (d->mute==TRUE && d->skip == FALSE) {
+				freemsg(im);
+				process_cn(f, d);
+
+				//Send STUN packet as RTP keep alive
+				check_stun_sending(f);
 			}else{
 				freemsg(im);
 			}
@@ -392,13 +420,9 @@ static void _sender_process(MSFilter * f)
 	}while ((im = ms_queue_get(f->inputs[0])) != NULL);
 
 	if (d->last_sent_time == -1) {
-		if ((d->last_stun_sent_time == -1) || ((f->ticker->time - d->last_stun_sent_time) >= 500)) {
-			d->last_stun_sent_time = f->ticker->time;
-		}
-		if (d->last_stun_sent_time == f->ticker->time) {
-			send_stun_packet(s);
-		}
+		check_stun_sending(f);
 	}
+
 	/*every second, compute output bandwidth*/
 	if (f->ticker->time % 1000 == 0) rtp_session_compute_send_bandwidth(d->session);
 	ms_filter_unlock(f);
@@ -416,16 +440,24 @@ static void sender_process(MSFilter * f){
 	else _sender_process(f);
 }
 
+static int sender_send_generic_cn(MSFilter *f, void *data){
+	SenderData *d = (SenderData *) f->data;
+	ms_filter_lock(f);
+	memcpy(&d->cng_data, data, sizeof(MSCngData));
+	ms_filter_unlock(f);
+	return 0;
+}
 
 static MSFilterMethod sender_methods[] = {
-	{MS_RTP_SEND_MUTE_MIC, sender_mute_mic},
-	{MS_RTP_SEND_UNMUTE_MIC, sender_unmute_mic},
+	{MS_RTP_SEND_MUTE, sender_mute},
+	{MS_RTP_SEND_UNMUTE, sender_unmute},
 	{MS_RTP_SEND_SET_SESSION, sender_set_session},
 	{MS_RTP_SEND_SEND_DTMF, sender_send_dtmf},
 	{MS_RTP_SEND_SET_RELAY_SESSION_ID, sender_set_relay_session_id},
 	{MS_FILTER_GET_SAMPLE_RATE, sender_get_sr },
 	{MS_FILTER_GET_NCHANNELS, sender_get_ch },
 	{MS_RTP_SEND_SET_DTMF_DURATION, sender_set_dtmf_duration },
+	{MS_RTP_SEND_SEND_GENERIC_CN, sender_send_generic_cn },
 	{0, NULL}
 };
 
@@ -468,6 +500,7 @@ MSFilterDesc ms_rtp_send_desc = {
 
 struct ReceiverData {
 	RtpSession *session;
+	int current_pt;
 	int rate;
 	bool_t starting;
 	bool_t reset_jb;
@@ -496,13 +529,13 @@ static int receiver_set_session(MSFilter * f, void *arg)
 {
 	ReceiverData *d = (ReceiverData *) f->data;
 	RtpSession *s = (RtpSession *) arg;
-	PayloadType *pt = rtp_profile_get_payload(rtp_session_get_profile(s),
-											  rtp_session_get_recv_payload_type
-											  (s));
+	PayloadType *pt;
+	d->current_pt=rtp_session_get_recv_payload_type(s);
+	pt = rtp_profile_get_payload(rtp_session_get_profile(s),d->current_pt);
 	if (pt != NULL) {
 		d->rate = pt->clock_rate;
 	} else {
-		ms_warning("Receiving undefined payload type %i ?",
+		ms_warning("receiver_set_session(): receiving undefined payload type %i ?",
 		    rtp_session_get_recv_payload_type(s));
 	}
 	d->session = s;
@@ -558,6 +591,33 @@ static void receiver_preprocess(MSFilter * f){
 	d->starting=TRUE;
 }
 
+/*returns TRUE if the packet is ok to be sent to output queue*/
+static bool_t receiver_check_payload_type(MSFilter *f, ReceiverData *d, mblk_t *m){
+	int ptn=rtp_get_payload_type(m);
+	PayloadType *pt;
+	if (ptn==d->current_pt) return TRUE;
+	pt=rtp_profile_get_payload(rtp_session_get_profile(d->session), ptn);
+	if (pt==NULL){
+		ms_warning("Discarding packet with unknown payload type %i",ptn);
+		return FALSE;
+	}
+	if (strcasecmp(pt->mime_type,"CN")==0){
+		MSCngData cngdata;
+		uint8_t *data=NULL;
+		int datasize=rtp_get_payload(m, &data);
+		if (data){
+			if (datasize<= sizeof(cngdata.data)){
+				memcpy(cngdata.data, data, datasize);
+				cngdata.datasize=datasize;
+				ms_filter_notify(f, MS_RTP_RECV_GENERIC_CN_RECEIVED, &cngdata);
+			}else{
+				ms_warning("CN packet has unexpected size %i", datasize);
+			}
+		}
+	}
+	return FALSE;
+}
+
 static void receiver_process(MSFilter * f)
 {
 	ReceiverData *d = (ReceiverData *) f->data;
@@ -584,11 +644,15 @@ static void receiver_process(MSFilter * f)
 
 	timestamp = (uint32_t) (f->ticker->time * (d->rate/1000));
 	while ((m = rtp_session_recvm_with_ts(d->session, timestamp)) != NULL) {
-		mblk_set_timestamp_info(m, rtp_get_timestamp(m));
-		mblk_set_marker_info(m, rtp_get_markbit(m));
-		mblk_set_cseq(m, rtp_get_seqnumber(m));
-		rtp_get_payload(m,&m->b_rptr);
-		ms_queue_put(f->outputs[0], m);
+		if (receiver_check_payload_type(f, d, m)){
+			mblk_set_timestamp_info(m, rtp_get_timestamp(m));
+			mblk_set_marker_info(m, rtp_get_markbit(m));
+			mblk_set_cseq(m, rtp_get_seqnumber(m));
+			rtp_get_payload(m,&m->b_rptr);
+			ms_queue_put(f->outputs[0], m);
+		}else{
+			freemsg(m);
+		}
 	}
 	/*every second compute recv bandwidth*/
 	if (f->ticker->time % 1000 == 0) rtp_session_compute_recv_bandwidth(d->session);

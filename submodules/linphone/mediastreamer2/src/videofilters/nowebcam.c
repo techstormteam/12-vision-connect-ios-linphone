@@ -53,7 +53,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #endif
 
 static mblk_t *jpeg2yuv(uint8_t *jpgbuf, int bufsize, MSVideoSize *reqsize){
-#ifndef NO_FFMPEG
+#if !defined(NO_FFMPEG) && !TARGET_OS_IPHONE /* this code must never be used for iOS */
 	AVCodecContext av_context;
 	int got_picture=0;
 	mblk_t *ret;
@@ -177,13 +177,16 @@ mblk_t *ms_load_jpeg_as_yuv(const char *jpgpath, MSVideoSize *reqsize){
 	uint8_t *jpgbuf;
 	DWORD err;
 	HANDLE fd;
-#if defined(UNICODE) && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#ifdef UNICODE
 	WCHAR wUnicode[1024];
 	MultiByteToWideChar(CP_UTF8, 0, jpgpath, -1, wUnicode, 1024);
+#else
+	const char *wUnicode = jpgpath;
+#endif
+#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 	fd = CreateFile2(wUnicode, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, NULL);
 #else
-	fd = CreateFile(jpgpath, GENERIC_READ, FILE_SHARE_READ, NULL,
-        OPEN_EXISTING, 0, NULL);
+	fd = CreateFile(wUnicode, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 #endif
 	if (fd==INVALID_HANDLE_VALUE){
 		ms_error("Failed to open %s",jpgpath);
@@ -191,7 +194,7 @@ mblk_t *ms_load_jpeg_as_yuv(const char *jpgpath, MSVideoSize *reqsize){
 	}
 	st_sizel=0;
 	st_sizeh=0;
-#if defined(UNICODE) && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 	{
 		WIN32_FILE_ATTRIBUTE_DATA attr_data;
 		GetFileAttributesEx(wUnicode, GetFileExInfoStandard, &attr_data);

@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "mediastreamer2/msvolume.h"
 #include "mediastreamer2/msticker.h"
+#include "mediastreamer2/msutils.h"
 #include <math.h>
 
 #ifdef HAVE_SPEEXDSP
@@ -40,75 +41,13 @@ static const float transmit_thres=4;
 static const float min_ng_floorgain=0.005;
 static const float agc_threshold=0.5;
 
-typedef struct Extremum{
-	float current_extremum;
-	uint64_t extremum_time;
-	float last_stable;
-	int period;
-}Extremum;
-
-static void extremum_reset(Extremum *obj){
-	obj->current_extremum=0;
-	obj->extremum_time=(uint64_t)-1;
-	obj->last_stable=0;
-}
-
-static void extremum_init(Extremum *obj, int period){
-	extremum_reset(obj);
-	obj->period=period;
-}
-
-static void extremum_set_new(Extremum *obj, const char* kind){
-	obj->last_stable=obj->current_extremum;
-	/*ms_message("New %s value : %f",kind,obj->last_stable);*/
-}
-
-static void extremum_check_init(Extremum *obj, uint64_t curtime, float value, const char *kind){
-	if (obj->extremum_time!=(uint64_t)-1){
-		if (curtime-obj->extremum_time>obj->period){
-			/*last extremum is too old, drop it*/
-			extremum_set_new(obj,kind);
-			obj->extremum_time=(uint64_t)-1;
-		}
-	}
-	if (obj->extremum_time==(uint64_t)-1){
-		obj->current_extremum=value;
-		obj->extremum_time=curtime;
-	}
-}
-
-static void extremum_record_min(Extremum *obj, uint64_t curtime, float value){
-	extremum_check_init(obj,curtime,value,"min");
-	if (value<obj->current_extremum){
-		obj->current_extremum=value;
-		obj->extremum_time=curtime;
-		if (value<obj->last_stable){
-			extremum_set_new(obj,"min");
-		}
-	}
-}
-
-static void extremum_record_max(Extremum *obj, uint64_t curtime, float value){
-	extremum_check_init(obj,curtime,value,"max");
-	if (value>obj->current_extremum){
-		obj->current_extremum=value;
-		obj->extremum_time=curtime;
-		if (value>obj->last_stable){
-			extremum_set_new(obj,"max");
-		}
-	}
-}
-
-static float extremum_get_current(Extremum *obj){
-	return obj->last_stable;
-}
 
 typedef struct Volume{
 	float energy;
 	float level_pk;
 	float instant_energy;
 	float lt_speaker_en;
-	float gain; 				/**< the one really applied, smoothed target_gain version*/
+	float gain; 		/**< the one really applied, smoothed target_gain version*/
 	float static_gain;	/**< the one fixed by the user */
 	int dc_offset;
 	//float gain_k;
@@ -133,8 +72,8 @@ typedef struct Volume{
 	float ng_floorgain;
 	float ng_gain;
 	MSBufferizer *buffer;
-	Extremum min;
-	Extremum max;
+	ortp_extremum min;
+	ortp_extremum max;
 	bool_t agc_enabled;
 	bool_t noise_gate_enabled;
 	bool_t remove_dc;
@@ -170,8 +109,8 @@ static void volume_init(MSFilter *f){
 #ifdef HAVE_SPEEXDSP
 	v->speex_pp=NULL;
 #endif
-	extremum_init(&v->max,1000);
-	extremum_init(&v->min,30000);
+	ortp_extremum_init(&v->max,1000);
+	ortp_extremum_init(&v->min,30000);
 	f->data=v;
 }
 
@@ -200,14 +139,14 @@ static int volume_get(MSFilter *f, void *arg){
 static int volume_get_min(MSFilter *f, void *arg){
 	float *farg=(float*)arg;
 	Volume *v=(Volume*)f->data;
-	*farg=linear_to_db(extremum_get_current(&v->min));
+	*farg=linear_to_db(ortp_extremum_get_current(&v->min));
 	return 0;
 }
 
 static int volume_get_max(MSFilter *f, void *arg){
 	float *farg=(float*)arg;
 	Volume *v=(Volume*)f->data;
-	*farg=linear_to_db(extremum_get_current(&v->max));
+	*farg=linear_to_db(ortp_extremum_get_current(&v->max));
 	return 0;
 }
 
@@ -264,12 +203,12 @@ static float volume_echo_avoider_process(Volume *v, mblk_t *om) {
 	float mic_spk_ratio;
 	peer_e = ((Volume *)(v->peer->data))->energy;
 	peer_pk=((Volume *)(v->peer->data))->energy;
-	
+
 	if (peer_pk>v->lt_speaker_en)
 		v->lt_speaker_en=peer_pk;
 	else v->lt_speaker_en=(0.005*peer_pk)+(0.995*v->lt_speaker_en);
 	mic_spk_ratio=(v->energy/(v->lt_speaker_en+v->ea_thres));
-	
+
 	/* where v->target_gain is not set, it is kept steady - not to modify elsewhere! */
 	if (peer_e > v->ea_thres) {
 		if (mic_spk_ratio>v->ea_transmit_thres){
@@ -450,7 +389,7 @@ static void update_energy(Volume *v, int16_t *signal, int numsamples, uint64_t c
 	float acc = 0;
 	float en;
 	int lp = 0, pk = 0;
-		
+
 	for (i=0;i<numsamples;++i){
 		int s=signal[i];
 		acc += s * s;
@@ -463,8 +402,8 @@ static void update_energy(Volume *v, int16_t *signal, int numsamples, uint64_t c
 	v->energy = (en * coef) + v->energy * (1.0 - coef);
 	v->level_pk = (float)pk / max_e;
 	v->instant_energy = en;// currently non-averaged energy seems better (short artefacts)
-	extremum_record_max(&v->max,curtime,v->energy);
-	extremum_record_min(&v->min,curtime,v->energy);
+	ortp_extremum_record_max(&v->max,curtime,v->energy);
+	ortp_extremum_record_min(&v->min,curtime,v->energy);
 }
 
 static void apply_gain(Volume *v, mblk_t *m, float tgain) {
@@ -474,7 +413,7 @@ static void apply_gain(Volume *v, mblk_t *m, float tgain) {
 	float gain;
 
 	/* ramps with factors means linear ramps in logarithmic domain */
-	
+
 	if (v->gain < tgain) {
 		if (v->gain<v->ng_floorgain)
 			v->gain=v->ng_floorgain;
@@ -492,7 +431,7 @@ static void apply_gain(Volume *v, mblk_t *m, float tgain) {
 	intgain = gain* 4096;
 
 
-	//if (v->peer) ms_message("MSVolume:%p Applying gain %5f, v->gain=%5f, tgain=%5f, ng_gain=%5f",v,gain,v->gain,tgain,v->ng_gain); 
+	//if (v->peer) ms_message("MSVolume:%p Applying gain %5f, v->gain=%5f, tgain=%5f, ng_gain=%5f",v,gain,v->gain,tgain,v->ng_gain);
 
 	if (v->remove_dc){
 		for (	sample=(int16_t*)m->b_rptr;
@@ -532,8 +471,8 @@ static void volume_preprocess(MSFilter *f){
 		}
 #endif
 	}
-	extremum_reset(&v->min);
-	extremum_reset(&v->max);
+	ortp_extremum_reset(&v->min);
+	ortp_extremum_reset(&v->max);
 }
 
 static void volume_process(MSFilter *f){

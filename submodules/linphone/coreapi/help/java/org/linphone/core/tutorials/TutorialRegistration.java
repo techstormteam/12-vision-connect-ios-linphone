@@ -30,11 +30,12 @@ import org.linphone.core.LinphoneContent;
 import org.linphone.core.LinphoneCore;
 import org.linphone.core.LinphoneCore.EcCalibratorStatus;
 import org.linphone.core.LinphoneCore.GlobalState;
+import org.linphone.core.LinphoneCore.LogCollectionUploadState;
 import org.linphone.core.LinphoneCore.RegistrationState;
 import org.linphone.core.LinphoneCore.RemoteProvisioningState;
 import org.linphone.core.LinphoneCoreException;
 import org.linphone.core.LinphoneCoreFactory;
-import org.linphone.core.LinphoneCoreListener;
+import org.linphone.core.LinphoneCoreListener.LinphoneListener;
 import org.linphone.core.LinphoneEvent;
 import org.linphone.core.LinphoneFriend;
 import org.linphone.core.LinphoneInfoMessage;
@@ -57,7 +58,7 @@ import org.linphone.core.SubscriptionState;
  * @author Guillaume Beraudo
  *
  */
-public class TutorialRegistration implements LinphoneCoreListener {
+public class TutorialRegistration implements LinphoneListener {
 	private boolean running;
 	private TutorialNotifier TutorialNotifier;
 
@@ -274,6 +275,16 @@ public class TutorialRegistration implements LinphoneCoreListener {
 		return 0;
 	}
 
+	@Override
+	public void uploadProgressIndication(LinphoneCore lc, int offset, int total) {
+		// TODO Auto-generated method stub
+		
+	}
 
-
+	@Override
+	public void uploadStateChanged(LinphoneCore lc,
+			LogCollectionUploadState state, String info) {
+		// TODO Auto-generated method stub
+		
+	}
 }

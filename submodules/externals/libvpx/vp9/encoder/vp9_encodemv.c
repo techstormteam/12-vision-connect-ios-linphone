@@ -163,7 +163,7 @@ static void write_mv_update(const vp9_tree_index *tree,
 
 void vp9_write_nmv_probs(VP9_COMMON *cm, int usehp, vp9_writer *w) {
   int i, j;
-  nmv_context *const mvc = &cm->fc.nmvc;
+  nmv_context *const mvc = &cm->fc->nmvc;
   nmv_context_counts *const counts = &cm->counts.mv;
 
   write_mv_update(vp9_mv_joint_tree, mvc->joints, counts->joints, MV_JOINTS, w);
@@ -216,7 +216,7 @@ void vp9_encode_mv(VP9_COMP* cpi, vp9_writer* w,
 
   // If auto_mv_step_size is enabled then keep track of the largest
   // motion vector component used.
-  if (!cpi->dummy_packing && cpi->sf.auto_mv_step_size) {
+  if (cpi->sf.mv.auto_mv_step_size) {
     unsigned int maxv = MAX(abs(mv->row), abs(mv->col)) >> 3;
     cpi->max_mv_magnitude = MAX(maxv, cpi->max_mv_magnitude);
   }
@@ -242,7 +242,7 @@ static void inc_mvs(const MB_MODE_INFO *mbmi, const int_mv mvs[2],
 }
 
 void vp9_update_mv_count(VP9_COMMON *cm, const MACROBLOCKD *xd) {
-  const MODE_INFO *mi = xd->mi[0];
+  const MODE_INFO *mi = xd->mi[0].src_mi;
   const MB_MODE_INFO *const mbmi = &mi->mbmi;
 
   if (mbmi->sb_type < BLOCK_8X8) {

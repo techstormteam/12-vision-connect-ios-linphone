@@ -154,7 +154,7 @@ void ms_factory_init(MSFactory *obj){
 
 	num_cpu = sysinfo.dwNumberOfProcessors;
 #elif __APPLE__ || __linux
-	num_cpu = sysconf( _SC_NPROCESSORS_ONLN );
+	num_cpu = sysconf( _SC_NPROCESSORS_CONF); /*check the number of processors configured, not just the one that are currently active.*/
 #elif __QNX__
 	num_cpu = _syspage_ptr->num_cpu;
 #else
@@ -655,7 +655,7 @@ struct _MSEventQueue *ms_factory_get_event_queue(MSFactory *obj){
 	return obj->evq;
 }
 
-/*this function is for compatibility, when event queues where created by the application*/
+/*this function is for compatibility, when event queues were created by the application*/
 void ms_factory_set_event_queue(MSFactory *obj, MSEventQueue *evq){
 	obj->evq=evq;
 }

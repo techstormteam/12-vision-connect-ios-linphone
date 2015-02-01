@@ -138,6 +138,20 @@ typedef enum {
 //-----------------------------------------------------------------//
 //  Algorithm parameters define
 //-----------------------------------------------------------------//
+
+typedef enum {
+  SIMILAR_SCENE,   //similar scene
+  MEDIUM_CHANGED_SCENE,   //medium changed scene
+  LARGE_CHANGED_SCENE     //large changed scene
+} ESceneChangeIdc;
+
+typedef enum {
+  NO_STATIC,  // motion block
+  COLLOCATED_STATIC, // collocated static block
+  SCROLLED_STATIC,  // scrolled static block
+  BLOCK_STATIC_IDC_ALL
+} EStaticBlockIdc;
+
 typedef struct {
   SRect sMaskRect;
   bool bMaskInfoAvailable;
@@ -146,24 +160,12 @@ typedef struct {
   bool bScrollDetectFlag; // 0:false ; 1:ltr; 2: scene change
 } SScrollDetectionParam;
 
-typedef enum {
-  SIMILAR_SCENE,   //similar scene
-  MEDIUM_CHANGED_SCENE,   //medium changed scene
-  LARGE_CHANGED_SCENE,    //large changed scene
-} ESceneChangeIdc;
-
-typedef enum {
-  NO_STATIC,  // motion block
-  COLLOCATED_STATIC, // collocated static block
-  SCROLLED_STATIC,  // scrolled static block
-  BLOCK_STATIC_IDC_ALL,
-} EStaticBlockIdc;
-
 typedef struct {
   ESceneChangeIdc eSceneChangeIdc; // SIMILAR_SCENE, MEDIUM_CHANGED_SCENE, LARGE_CHANGED_SCENE
   int             iMotionBlockNum; // Number of motion blocks
   int             iFrameComplexity; // frame complexity
   unsigned char* pStaticBlockIdc;   // static block idc
+  SScrollDetectionParam sScrollResult; //results from scroll detection
 } SSceneChangeResult;
 
 typedef struct {
@@ -193,7 +195,7 @@ typedef struct {
 
 typedef enum {
   AQ_QUALITY_MODE,   //Quality mode
-  AQ_BITRATE_MODE,   //Bitrate mode
+  AQ_BITRATE_MODE    //Bitrate mode
 } EAQModes;
 
 typedef struct {
@@ -207,7 +209,7 @@ typedef struct {
   SMotionTextureUnit*  pMotionTextureUnit;
 
   signed char*			pMotionTextureIndexToDeltaQp;
-  double				dAverMotionTextureIndexToDeltaQp;
+  int				iAverMotionTextureIndexToDeltaQp; // *AQ_STEP_INT_MULTIPLY
 } SAdaptiveQuantizationParam;
 
 typedef enum {
@@ -215,12 +217,6 @@ typedef enum {
   GOM_SAD       = -1,
   GOM_VAR       = -2
 } EComplexityAnalysisMode;
-
-typedef struct {
-  int iScrollMvX;
-  int iScrollMvY;
-  bool bScrollDetectFlag; // 0:false ; 1:ltr; 2: scene change
-} SScrollDetectionResult;
 
 typedef struct {
   int  iComplexityAnalysisMode;
@@ -240,7 +236,7 @@ typedef struct {
   int  iGomNumInFrame;
   int  iFrameComplexity;
   int  iIdrFlag;
-  SScrollDetectionResult sScrollResult;
+  SScrollDetectionParam sScrollResult;
 } SComplexityAnalysisScreenParam;
 /////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -304,8 +300,8 @@ class IWelsVP {
 #endif
 
 WELSVP_EXTERNC_BEGIN
-EResult CreateVpInterface (void** ppCtx, int iVersion /*= WELSVP_INTERFACE_VERION*/);
-EResult DestroyVpInterface (void* pCtx , int iVersion /*= WELSVP_INTERFACE_VERION*/);
+EResult WelsCreateVpInterface (void** ppCtx, int iVersion /*= WELSVP_INTERFACE_VERION*/);
+EResult WelsDestroyVpInterface (void* pCtx , int iVersion /*= WELSVP_INTERFACE_VERION*/);
 WELSVP_EXTERNC_END
 
 //////////////////////////////////////////////////////////////////////////////////////////////

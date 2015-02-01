@@ -80,7 +80,7 @@ MSTicker *ms_ticker_new(){
 }
 
 MSTicker *ms_ticker_new_with_params(const MSTickerParams *params){
-	MSTicker *obj=(MSTicker *)ms_new(MSTicker,1);
+	MSTicker *obj=(MSTicker *)ms_new0(MSTicker,1);
 	ms_ticker_init(obj,params);
 	return obj;
 }
@@ -435,6 +435,8 @@ void * ms_ticker_run(void *arg)
 	ms_mutex_lock(&s->lock);
 
 	while(s->run){
+		uint64_t late_tick_time=0;
+		
 		s->ticks++;
 		/*Step 1: run the graphs*/
 		{
@@ -458,9 +460,14 @@ void * ms_ticker_run(void *arg)
 		late=s->wait_next_tick(s->wait_next_tick_data,s->time);
 		if (late>s->interval*5 && late>lastlate){
 			ms_warning("%s: We are late of %d miliseconds.",s->name,late);
+			late_tick_time=ms_get_cur_time_ms();
 		}
 		lastlate=late;
 		ms_mutex_lock(&s->lock);
+		if (late_tick_time){
+			s->late_event.lateMs=late;
+			s->late_event.time=late_tick_time;
+		}
 	}
 	ms_mutex_unlock(&s->lock);
 	unset_high_prio(precision);
@@ -548,6 +555,11 @@ float ms_ticker_get_average_load(MSTicker *ticker){
 	return ticker->av_load;
 }
 
+void ms_ticker_get_last_late_tick(MSTicker *ticker, MSTickerLateEvent *ev){
+	ms_mutex_lock(&ticker->lock);
+	memcpy(ev,&ticker->late_event,sizeof(MSTickerLateEvent));
+	ms_mutex_unlock(&ticker->lock);
+}
 
 static uint64_t get_ms(const MSTimeSpec *ts){
 	return (ts->tv_sec*1000LL) + ((ts->tv_nsec+500000LL)/1000000LL);
@@ -562,7 +574,7 @@ static uint64_t get_wallclock_ms(void){
 static const double clock_coef = .01;
 
 MSTickerSynchronizer* ms_ticker_synchronizer_new(void) {
-	MSTickerSynchronizer *obj=(MSTickerSynchronizer *)ms_new(MSTickerSynchronizer,1);
+	MSTickerSynchronizer *obj=(MSTickerSynchronizer *)ms_new0(MSTickerSynchronizer,1);
 	obj->av_skew = 0;
 	obj->offset = 0;
 	return obj;

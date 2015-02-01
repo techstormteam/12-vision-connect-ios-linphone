@@ -78,6 +78,9 @@ static LPFN_WSARECVMSG ortp_WSARecvMsg = NULL;
 #	ifndef AI_V4MAPPED
 #	define AI_V4MAPPED 0x00000800
 #	endif
+#	ifndef AI_ALL
+#	define AI_ALL 0x0
+#	endif
 #endif
 
 #ifndef IN6_IS_ADDR_MULTICAST
@@ -95,7 +98,7 @@ static bool_t try_connect(int fd, const struct sockaddr *dest, socklen_t addrlen
 	return TRUE;
 }
 
-static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_family, bool_t reuse_addr){
+static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_family, bool_t reuse_addr,struct sockaddr_storage* bound_addr,socklen_t *bound_addr_len){
 	int err;
 	int optval = 1;
 	ortp_socket_t sock=-1;
@@ -106,8 +109,9 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 	if (*port==0) reuse_addr=FALSE;
 
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = PF_UNSPEC;
+	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
+
 	snprintf(num, sizeof(num), "%d",*port);
 	err = getaddrinfo(addr,num, &hints, &res0);
 	if (err!=0) {
@@ -177,6 +181,8 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 					close_socket (sock);
 					sock=-1;
 					continue;
+				} else {
+					ortp_message ("RTP socket [%i] has joined address group [%s]",sock, addr);
 				}
 			}
 		break;
@@ -193,6 +199,8 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 					close_socket (sock);
 					sock=-1;
 					continue;
+				} else {
+					ortp_message ("RTP socket 6 [%i] has joined address group [%s]",sock, addr);
 				}
 			}
 		break;
@@ -200,6 +208,9 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 #endif /*hpux*/
 		break;
 	}
+	memcpy(bound_addr,res0->ai_addr,res0->ai_addrlen);
+	*bound_addr_len=res0->ai_addrlen;
+
 	freeaddrinfo(res0);
 
 #if defined(WIN32) || defined(_WIN32_WCE)
@@ -298,14 +309,14 @@ rtp_session_set_local_addr (RtpSession * session, const char * addr, int rtp_por
 	}
 	/* try to bind the rtp port */
 
-	sock=create_and_bind(addr,&rtp_port,&sockfamily,session->reuseaddr);
+	sock=create_and_bind(addr,&rtp_port,&sockfamily,session->reuseaddr,&session->rtp.gs.loc_addr,&session->rtp.gs.loc_addrlen);
 	if (sock!=-1){
 		set_socket_sizes(sock,session->rtp.snd_socket_size,session->rtp.rcv_socket_size);
 		session->rtp.gs.sockfamily=sockfamily;
 		session->rtp.gs.socket=sock;
 		session->rtp.gs.loc_port=rtp_port;
 		/*try to bind rtcp port */
-		sock=create_and_bind(addr,&rtcp_port,&sockfamily,session->reuseaddr);
+		sock=create_and_bind(addr,&rtcp_port,&sockfamily,session->reuseaddr,&session->rtcp.gs.loc_addr,&session->rtcp.gs.loc_addrlen);
 		if (sock!=(ortp_socket_t)-1){
 			session->rtcp.gs.sockfamily=sockfamily;
 			session->rtcp.gs.socket=sock;
@@ -733,12 +744,19 @@ _rtp_session_set_remote_addr_full (RtpSession * session, const char * rtp_addr, 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = (session->rtp.gs.socket == -1) ? AF_UNSPEC : session->rtp.gs.sockfamily;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = hints.ai_family==AF_INET6 ? AI_V4MAPPED : 0;
+#ifndef ANDROID
+	hints.ai_flags |= hints.ai_family==AF_INET6 ? AI_V4MAPPED | AI_ALL : 0;
+#else
+	/*
+	 * Bionic has a crappy implementation of getaddrinfo() that doesn't support the AI_V4MAPPED flag.
+	 * However since linux kernel is very tolerant, you can pass an IPv4 sockaddr to sendto without causing problem.
+	 */
+#endif
 
 	snprintf(num, sizeof(num), "%d", rtp_port);
 	err = getaddrinfo(rtp_addr, num, &hints, &res0);
 	if (err) {
-		ortp_warning ("Error in socket address: %s", gai_strerror(err));
+		ortp_warning("Error in socket address (hints.ai_family=%i, hints.ai_flags=%i): %s", hints.ai_family, hints.ai_flags, gai_strerror(err));
 		err=-1;
 		goto end;
 	}
@@ -775,7 +793,9 @@ _rtp_session_set_remote_addr_full (RtpSession * session, const char * rtp_addr, 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = (session->rtp.gs.socket == -1) ? AF_UNSPEC : session->rtp.gs.sockfamily;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = hints.ai_family==AF_INET6 ? AI_V4MAPPED : 0;
+#ifndef ANDROID
+	hints.ai_flags |= hints.ai_family==AF_INET6 ? AI_V4MAPPED | AI_ALL : 0;
+#endif
 	snprintf(num, sizeof(num), "%d", rtcp_port);
 	err = getaddrinfo(rtcp_addr, num, &hints, &res0);
 	if (err) {
@@ -891,7 +911,7 @@ void rtp_session_set_transports(RtpSession *session, struct _RtpTransport *rtptr
 	else session->flags&=~(RTP_SESSION_USING_TRANSPORT);
 }
 
-void rtp_session_get_transports(RtpSession *session, RtpTransport **rtptr, RtpTransport **rtcptr){
+void rtp_session_get_transports(const RtpSession *session, RtpTransport **rtptr, RtpTransport **rtcptr){
 	if (rtptr) *rtptr=session->rtp.gs.tr;
 	if (rtcptr) *rtcptr=session->rtcp.gs.tr;
 }
@@ -908,34 +928,15 @@ void rtp_session_get_transports(RtpSession *session, RtpTransport **rtptr, RtpTr
  *
 **/
 void rtp_session_flush_sockets(RtpSession *session){
-	unsigned char trash[4096];
-	struct sockaddr_storage from;
-
-	socklen_t fromlen=sizeof(from);
-	if (rtp_session_using_transport(session, rtp))
-		{
-		mblk_t *trashmp=esballoc(trash,sizeof(trash),0,NULL);
-
-		while (session->rtp.gs.tr->t_recvfrom(session->rtp.gs.tr,trashmp,0,(struct sockaddr *)&from,&fromlen)>0){};
-
-		if (session->rtcp.gs.tr)
-			while (session->rtcp.gs.tr->t_recvfrom(session->rtcp.gs.tr,trashmp,0,(struct sockaddr *)&from,&fromlen)>0){};
-			freemsg(trashmp);
-			return;
-		}
-
-	if (session->rtp.gs.socket!=(ortp_socket_t)-1){
-		while (recvfrom(session->rtp.gs.socket,(char*)trash,sizeof(trash),0,(struct sockaddr *)&from,&fromlen)>0){};
-	}
-	if (session->rtcp.gs.socket!=(ortp_socket_t)-1){
-		while (recvfrom(session->rtcp.gs.socket,(char*)trash,sizeof(trash),0,(struct sockaddr*)&from,&fromlen)>0){};
-	}
+	rtp_session_set_flag(session, RTP_SESSION_FLUSH);
+	rtp_session_rtp_recv(session, 0);
+	rtp_session_unset_flag(session, RTP_SESSION_FLUSH);
 }
 
 
 #ifdef USE_SENDMSG
 #define MAX_IOV 30
-static int rtp_sendmsg(int sock,mblk_t *m, struct sockaddr *rem_addr, int addr_len){
+static int rtp_sendmsg(int sock,mblk_t *m, const struct sockaddr *rem_addr, socklen_t addr_len){
 	int error;
 	struct msghdr msg;
 	struct iovec iov[MAX_IOV];
@@ -959,6 +960,18 @@ static int rtp_sendmsg(int sock,mblk_t *m, struct sockaddr *rem_addr, int addr_l
 }
 #endif
 
+int _ortp_sendto(ortp_socket_t sockfd, mblk_t *m, int flags, const struct sockaddr *destaddr, socklen_t destlen){
+	int error;
+#ifdef USE_SENDMSG
+	error=rtp_sendmsg(sockfd,m,destaddr,destlen);
+#else
+	if (m->b_cont!=NULL)
+		msgpullup(m,-1);
+	error = sendto (sockfd, (char*)m->b_rptr, (int) (m->b_wptr - m->b_rptr),
+		0,destaddr,destlen);
+#endif
+	return error;
+}
 
 static void update_sent_bytes(OrtpStream *os, int nbytes) {
 	int overhead = ortp_stream_is_ipv6(os) ? IP6_UDP_OVERHEAD : IP_UDP_OVERHEAD;
@@ -992,14 +1005,7 @@ static int rtp_session_rtp_sendto(RtpSession * session, mblk_t * m, struct socka
 	if (rtp_session_using_transport(session, rtp)){
 		error = (session->rtp.gs.tr->t_sendto) (session->rtp.gs.tr,m,0,destaddr,destlen);
 	}else{
-#ifdef USE_SENDMSG
-		error=rtp_sendmsg(sockfd,m,destaddr,destlen);
-#else
-		if (m->b_cont!=NULL)
-			msgpullup(m,-1);
-		error = sendto (sockfd, (char*)m->b_rptr, (int) (m->b_wptr - m->b_rptr),
-			0,destaddr,destlen);
-#endif
+		error=_ortp_sendto(sockfd,m,0,destaddr,destlen);
 	}
 	if (!is_aux){
 		/*errors to auxiliary destinations are not notified*/

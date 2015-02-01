@@ -65,11 +65,12 @@ static int tester_cleanup(void) {
 #define MARGAUX_RTCP_PORT 9865
 #define MARGAUX_IP "127.0.0.1"
 
-#define HELLO_8K_1S_FILE SOUND_FILE_PATH "hello8000-1s.wav"
-#define HELLO_16K_1S_FILE SOUND_FILE_PATH "hello16000-1s.wav"
-#define RECORDED_8K_1S_FILE WRITE_FILE_PATH "recorded_hello8000-1s.wav"
-#define RECORDED_16K_1S_FILE WRITE_FILE_PATH "recorded_hello16000-1s.wav"
+#define HELLO_8K_1S_FILE  "sounds/hello8000-1s.wav"
+#define HELLO_16K_1S_FILE  "sounds/hello16000-1s.wav"
+#define RECORDED_8K_1S_FILE  "sounds/recorded_hello8000-1s.wav"
+#define RECORDED_16K_1S_FILE  "sounds/recorded_hello16000-1s.wav"
 
+#define MULTICAST_IP  "224.1.2.3"
 
 typedef struct _stats_t {
 	rtp_stats_t rtp;
@@ -95,41 +96,49 @@ static void notify_cb(void *user_data, MSFilter *f, unsigned int event, void *ev
 
 }
 
-static void basic_audio_stream() {
-	AudioStream * 	marielle = audio_stream_new (MARIELLE_RTP_PORT, MARIELLE_RTCP_PORT,FALSE);
+static void basic_audio_stream_base(	const char* marielle_local_ip
+									, 	int marielle_local_rtp_port
+									, 	int marielle_local_rtcp_port
+									, 	const char*  margaux_local_ip
+									, 	int margaux_local_rtp_port
+									, 	int margaux_local_rtcp_port) {
+	AudioStream * 	marielle = audio_stream_new2 (marielle_local_ip, marielle_local_rtp_port, marielle_local_rtcp_port);
 	stats_t marielle_stats;
-	AudioStream * 	margaux = audio_stream_new (MARGAUX_RTP_PORT,MARGAUX_RTCP_PORT, FALSE);
+	AudioStream * 	margaux = audio_stream_new2 (margaux_local_ip, margaux_local_rtp_port,margaux_local_rtcp_port);
 	stats_t margaux_stats;
 	RtpProfile* profile = rtp_profile_new("default profile");
+	char* hello_file = ms_strdup_printf("%s/%s", mediastreamer2_tester_get_file_root(), HELLO_8K_1S_FILE);
+	char* recorded_file = ms_strdup_printf("%s/%s", mediastreamer2_tester_get_writable_dir(), RECORDED_8K_1S_FILE);
 
 	reset_stats(&marielle_stats);
 	reset_stats(&margaux_stats);
 
 	rtp_profile_set_payload (profile,0,&payload_type_pcmu8000);
 
+
 	CU_ASSERT_EQUAL(audio_stream_start_full(margaux
 											, profile
-											, MARIELLE_IP
-											, MARIELLE_RTP_PORT
-											, MARIELLE_IP
-											, MARIELLE_RTCP_PORT
+											, ms_is_multicast(margaux_local_ip)?margaux_local_ip:marielle_local_ip
+											, ms_is_multicast(margaux_local_ip)?margaux_local_rtp_port:marielle_local_rtp_port
+											, marielle_local_ip
+											, marielle_local_rtcp_port
 											, 0
 											, 50
 											, NULL
-											, RECORDED_8K_1S_FILE
+											, recorded_file
 											, NULL
 											, NULL
 											, 0),0);
 
 	CU_ASSERT_EQUAL(audio_stream_start_full(marielle
 											, profile
-											, MARGAUX_IP
-											, MARGAUX_RTP_PORT
-											, MARGAUX_IP
-											, MARGAUX_RTCP_PORT
+											, margaux_local_ip
+											, margaux_local_rtp_port
+											, margaux_local_ip
+											, margaux_local_rtcp_port
 											, 0
 											, 50
-											, HELLO_8K_1S_FILE
+											, hello_file
 											, NULL
 											, NULL
 											, NULL
@@ -148,9 +157,160 @@ static void basic_audio_stream() {
 	audio_stream_stop(marielle);
 	audio_stream_stop(margaux);
 
-	unlink(RECORDED_8K_1S_FILE);
+	unlink(recorded_file);
+	ms_free(recorded_file);
+	ms_free(hello_file);
+}
+static void basic_audio_stream()  {
+	basic_audio_stream_base(MARIELLE_IP,MARIELLE_RTP_PORT,MARIELLE_RTCP_PORT
+							,MARGAUX_IP, MARGAUX_RTP_PORT, MARGAUX_RTCP_PORT);
 }
 
+static void multicast_audio_stream()  {
+	basic_audio_stream_base("0.0.0.0",MARIELLE_RTP_PORT, 0
+							,MULTICAST_IP, MARGAUX_RTP_PORT, 0);
+}
+
+static void encrypted_audio_stream_base( bool_t change_ssrc,
+										 bool_t change_send_key_in_the_middle
+										,bool_t set_both_send_recv_key
+										,bool_t send_key_first) {
+	AudioStream * 	marielle = audio_stream_new (MARIELLE_RTP_PORT, MARIELLE_RTCP_PORT,FALSE);
+	AudioStream * 	margaux = audio_stream_new (MARGAUX_RTP_PORT,MARGAUX_RTCP_PORT, FALSE);
+	RtpProfile* profile = rtp_profile_new("default profile");
+	char* hello_file = ms_strdup_printf("%s/%s", mediastreamer2_tester_get_file_root(), HELLO_8K_1S_FILE);
+	char* recorded_file = ms_strdup_printf("%s/%s", mediastreamer2_tester_get_writable_dir(), RECORDED_8K_1S_FILE);
+	stats_t marielle_stats;
+	stats_t margaux_stats;
+	if (ms_srtp_supported()) {
+		reset_stats(&marielle_stats);
+		reset_stats(&margaux_stats);
+
+		rtp_profile_set_payload (profile,0,&payload_type_pcmu8000);
+
+		CU_ASSERT_EQUAL(audio_stream_start_full(margaux
+				, profile
+				, MARIELLE_IP
+				, MARIELLE_RTP_PORT
+				, MARIELLE_IP
+				, MARIELLE_RTCP_PORT
+				, 0
+				, 50
+				, NULL
+				, recorded_file
+				, NULL
+				, NULL
+				, 0),0);
+
+		CU_ASSERT_EQUAL(audio_stream_start_full(marielle
+				, profile
+				, MARGAUX_IP
+				, MARGAUX_RTP_PORT
+				, MARGAUX_IP
+				, MARGAUX_RTCP_PORT
+				, 0
+				, 50
+				, hello_file
+				, NULL
+				, NULL
+				, NULL
+				, 0),0);
+
+		if (send_key_first) {
+			CU_ASSERT_TRUE(media_stream_set_srtp_send_key_b64(&(marielle->ms.sessions), MS_AES_128_SHA1_32, "d0RmdmcmVCspeEc3QGZiNWpVLFJhQX1cfHAwJSoj") == 0);
+			if (set_both_send_recv_key)
+				CU_ASSERT_TRUE(media_stream_set_srtp_send_key_b64(&(margaux->ms.sessions), MS_AES_128_SHA1_32, "6jCLmtRkVW9E/BUuJtYj/R2z6+4iEe06/DWohQ9F") == 0);
+
+			CU_ASSERT_TRUE(media_stream_set_srtp_recv_key_b64(&(margaux->ms.sessions), MS_AES_128_SHA1_32, "d0RmdmcmVCspeEc3QGZiNWpVLFJhQX1cfHAwJSoj") ==0);
+			if (set_both_send_recv_key)
+				CU_ASSERT_TRUE(media_stream_set_srtp_recv_key_b64(&(marielle->ms.sessions), MS_AES_128_SHA1_32, "6jCLmtRkVW9E/BUuJtYj/R2z6+4iEe06/DWohQ9F") ==0);
+
+		} else {
+			CU_ASSERT_TRUE(media_stream_set_srtp_recv_key_b64(&(margaux->ms.sessions), MS_AES_128_SHA1_32, "d0RmdmcmVCspeEc3QGZiNWpVLFJhQX1cfHAwJSoj") ==0);
+			if (set_both_send_recv_key)
+				CU_ASSERT_TRUE(media_stream_set_srtp_recv_key_b64(&(marielle->ms.sessions), MS_AES_128_SHA1_32, "6jCLmtRkVW9E/BUuJtYj/R2z6+4iEe06/DWohQ9F") ==0);
+
+			CU_ASSERT_TRUE(media_stream_set_srtp_send_key_b64(&(marielle->ms.sessions), MS_AES_128_SHA1_32, "d0RmdmcmVCspeEc3QGZiNWpVLFJhQX1cfHAwJSoj") == 0);
+			if (set_both_send_recv_key)
+				CU_ASSERT_TRUE(media_stream_set_srtp_send_key_b64(&(margaux->ms.sessions), MS_AES_128_SHA1_32, "6jCLmtRkVW9E/BUuJtYj/R2z6+4iEe06/DWohQ9F") == 0);
+
+		}
+
+		ms_filter_add_notify_callback(marielle->soundread, notify_cb, &marielle_stats,TRUE);
+		if (change_send_key_in_the_middle) {
+			int dummy=0;
+			wait_for_until(&marielle->ms,&margaux->ms,&dummy,1,2000);
+			CU_ASSERT_TRUE(media_stream_set_srtp_send_key_b64(&(marielle->ms.sessions), MS_AES_128_SHA1_32, "eCYF4nYyCvmCpFWjUeDaxI2GWp2BzCRlIPfg52Te") == 0);
+			CU_ASSERT_TRUE(media_stream_set_srtp_recv_key_b64(&(margaux->ms.sessions), MS_AES_128_SHA1_32, "eCYF4nYyCvmCpFWjUeDaxI2GWp2BzCRlIPfg52Te") ==0);
+		}
+		CU_ASSERT_TRUE(wait_for_until(&marielle->ms,&margaux->ms,&marielle_stats.number_of_EndOfFile,1,12000));
+
+		audio_stream_get_local_rtp_stats(marielle,&marielle_stats.rtp);
+		audio_stream_get_local_rtp_stats(margaux,&margaux_stats.rtp);
+
+		/* No packet loss is assumed */
+		CU_ASSERT_EQUAL(marielle_stats.rtp.sent,margaux_stats.rtp.recv);
+
+		if (change_ssrc) {
+			audio_stream_stop(marielle);
+			marielle = audio_stream_new (MARIELLE_RTP_PORT, MARIELLE_RTCP_PORT,FALSE);
+			CU_ASSERT_EQUAL(audio_stream_start_full(marielle
+							, profile
+							, MARGAUX_IP
+							, MARGAUX_RTP_PORT
+							, MARGAUX_IP
+							, MARGAUX_RTCP_PORT
+							, 0
+							, 50
+							, hello_file
+							, NULL
+							, NULL
+							, NULL
+							, 0),0);
+			CU_ASSERT_FATAL(media_stream_set_srtp_send_key_b64(&(marielle->ms.sessions), MS_AES_128_SHA1_32, "d0RmdmcmVCspeEc3QGZiNWpVLFJhQX1cfHAwJSoj") == 0);
+
+			ms_filter_add_notify_callback(marielle->soundread, notify_cb, &marielle_stats,TRUE);
+
+			CU_ASSERT_TRUE(wait_for_until(&marielle->ms,&margaux->ms,&marielle_stats.number_of_EndOfFile,2,12000));
+
+			audio_stream_get_local_rtp_stats(marielle,&marielle_stats.rtp);
+			audio_stream_get_local_rtp_stats(margaux,&margaux_stats.rtp);
+
+			/* No packet loss is assumed */
+			CU_ASSERT_EQUAL(marielle_stats.rtp.sent*2,margaux_stats.rtp.recv);
+
+		}
+
+		unlink(recorded_file);
+		ms_free(recorded_file);
+		ms_free(hello_file);
+	} else {
+		ms_warning("srtp not available, skiping...");
+	}
+
+	audio_stream_stop(marielle);
+	audio_stream_stop(margaux);
+
+}
+static void encrypted_audio_stream() {
+	encrypted_audio_stream_base(FALSE,FALSE,FALSE,TRUE);
+}
+
+static void encrypted_audio_stream_with_2_srtp_stream() {
+	encrypted_audio_stream_base(FALSE,FALSE,TRUE,TRUE);
+}
+
+static void encrypted_audio_stream_with_2_srtp_stream_recv_first() {
+	encrypted_audio_stream_base(FALSE,FALSE,TRUE,FALSE);
+}
+
+static void encrypted_audio_stream_with_key_change() {
+	encrypted_audio_stream_base(FALSE,TRUE,FALSE,TRUE);
+}
+
+static void encrypted_audio_stream_with_ssrc_change() {
+	encrypted_audio_stream_base(TRUE,FALSE,FALSE,TRUE);
+}
 #if 0
 static void audio_stream_dtmf(int codec_payload, int initial_bitrate,int target_bw, int max_recv_rtcp_packet) {
 	stream_manager_t * marielle = stream_manager_new();
@@ -194,6 +354,12 @@ static void audio_stream_dtmf(int codec_payload, int initial_bitrate,int target_
 
 static test_t tests[] = {
 	{ "Basic audio stream", basic_audio_stream },
+	{ "Multicast audio stream", multicast_audio_stream },
+	{ "Encrypted audio stream", encrypted_audio_stream },
+	{ "Encrypted audio stream with 2 srtp context",encrypted_audio_stream_with_2_srtp_stream},
+	{ "Encrypted audio stream with 2 srtp context, recv first",encrypted_audio_stream_with_2_srtp_stream_recv_first},
+	{ "Encrypted audio stream with ssrc changes", encrypted_audio_stream_with_ssrc_change},
+	{ "Encrypted audio stream with key change",encrypted_audio_stream_with_key_change},
 };
 
 test_suite_t audio_stream_test_suite = {

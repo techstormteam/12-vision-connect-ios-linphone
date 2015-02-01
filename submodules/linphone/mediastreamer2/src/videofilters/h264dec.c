@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mediastreamer2/rfc3984.h"
 #include "mediastreamer2/msvideo.h"
 #include "mediastreamer2/msticker.h"
+#include "stream_regulator.h"
 
 #include "ffmpeg-priv.h"
 
@@ -29,11 +30,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 typedef struct _DecData{
-	mblk_t *yuv_msg;
 	mblk_t *sps,*pps;
 	AVFrame* orig;
 	Rfc3984Context unpacker;
-	MSPicture outbuf;
+	MSVideoSize vsize;
 	struct SwsContext *sws_ctx;
 	MSAverageFPS fps;
 	AVCodecContext av_context;
@@ -41,14 +41,13 @@ typedef struct _DecData{
 	uint8_t *bitstream;
 	int bitstream_size;
 	bool_t first_image_decoded;
+	MSStreamRegulator *regulator;
+	MSYuvBufAllocator *buf_allocator;
 }DecData;
 
 static void ffmpeg_init(){
 	static bool_t done=FALSE;
 	if (!done){
-#ifdef FF_API_AVCODEC_INIT
-		avcodec_init();
-#endif
 		avcodec_register_all();
 		done=TRUE;
 	}
@@ -67,17 +66,16 @@ static void dec_open(DecData *d){
 }
 
 static void dec_init(MSFilter *f){
-	DecData *d=(DecData*)ms_new(DecData,1);
+	DecData *d=ms_new0(DecData,1);
 	ffmpeg_init();
-	d->yuv_msg=NULL;
 	d->sps=NULL;
 	d->pps=NULL;
 	d->sws_ctx=NULL;
 	rfc3984_init(&d->unpacker);
 	d->packet_num=0;
 	dec_open(d);
-	d->outbuf.w=0;
-	d->outbuf.h=0;
+	d->vsize.width=0;
+	d->vsize.height=0;
 	d->bitstream_size=65536;
 	d->bitstream=ms_malloc0(d->bitstream_size);
 	d->orig = av_frame_alloc();
@@ -85,12 +83,15 @@ static void dec_init(MSFilter *f){
 	if (!d->orig) {
 		ms_error("Could not allocate frame");
 	}
+	d->regulator = NULL;
+	d->buf_allocator = ms_yuv_buf_allocator_new();
 	f->data=d;
 }
 
 static void dec_preprocess(MSFilter* f) {
 	DecData *s=(DecData*)f->data;
 	s->first_image_decoded = FALSE;
+	s->regulator = ms_stream_regulator_new(f->ticker, 90000);
 }
 
 static void dec_reinit(DecData *d){
@@ -98,47 +99,56 @@ static void dec_reinit(DecData *d){
 	dec_open(d);
 }
 
+static void dec_postprocess(MSFilter *f) {
+	DecData *s=(DecData*)f->data;
+	ms_stream_regulator_free(s->regulator);
+}
+
 static void dec_uninit(MSFilter *f){
 	DecData *d=(DecData*)f->data;
 	rfc3984_uninit(&d->unpacker);
 	avcodec_close(&d->av_context);
-	if (d->yuv_msg) freemsg(d->yuv_msg);
 	if (d->sps) freemsg(d->sps);
 	if (d->pps) freemsg(d->pps);
 	if (d->orig) av_frame_free(&d->orig);
+	if (d->sws_ctx) sws_freeContext(d->sws_ctx);
 	ms_free(d->bitstream);
+	ms_yuv_buf_allocator_free(d->buf_allocator);
 	ms_free(d);
 }
 
 static mblk_t *get_as_yuvmsg(MSFilter *f, DecData *s, AVFrame *orig){
 	AVCodecContext *ctx=&s->av_context;
+	MSPicture pic = {0};
+	mblk_t *yuv_msg;
 
-	if (s->outbuf.w!=ctx->width || s->outbuf.h!=ctx->height){
+	if (s->vsize.width!=ctx->width || s->vsize.height!=ctx->height){
 		if (s->sws_ctx!=NULL){
 			sws_freeContext(s->sws_ctx);
 			s->sws_ctx=NULL;
-			freemsg(s->yuv_msg);
-			s->yuv_msg=NULL;
 		}
 		ms_message("Getting yuv picture of %ix%i",ctx->width,ctx->height);
-		s->yuv_msg=ms_yuv_buf_alloc(&s->outbuf,ctx->width,ctx->height);
-		s->outbuf.w=ctx->width;
-		s->outbuf.h=ctx->height;
+		s->vsize.width=ctx->width;
+		s->vsize.height=ctx->height;
 		s->sws_ctx=sws_getContext(ctx->width,ctx->height,ctx->pix_fmt,
 			ctx->width,ctx->height,PIX_FMT_YUV420P,SWS_FAST_BILINEAR,
                 	NULL, NULL, NULL);
 		ms_filter_notify_no_arg(f,MS_FILTER_OUTPUT_FMT_CHANGED);
 	}
+	yuv_msg=ms_yuv_buf_allocator_get(s->buf_allocator, &pic,ctx->width,ctx->height);
 #if LIBSWSCALE_VERSION_INT >= AV_VERSION_INT(0,9,0)
 	if (sws_scale(s->sws_ctx,(const uint8_t * const *)orig->data,orig->linesize, 0,
-					ctx->height, s->outbuf.planes, s->outbuf.strides)<0){
+					ctx->height, pic.planes, pic.strides)<0){
 #else
 	if (sws_scale(s->sws_ctx,(uint8_t **)orig->data,orig->linesize, 0,
-					ctx->height, s->outbuf.planes, s->outbuf.strides)<0){
+					ctx->height, pic.planes, pic.strides)<0){
 #endif
 		ms_error("%s: error in sws_scale().",f->desc->name);
 	}
-	return dupmsg(s->yuv_msg);
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(50,43,0) // backward compatibility with Debian Squeeze (6.0)
+	mblk_set_timestamp_info(yuv_msg, orig->pkt_pts);
+#endif
+	return yuv_msg;
 }
 
 static void update_sps(DecData *d, mblk_t *sps){
@@ -217,9 +227,9 @@ static int nalusToFrame(DecData *d, MSQueue *naluq, bool_t *new_sps_pps){
 		}else{
 			nalu_type=(*src) & ((1<<5)-1);
 			if (nalu_type==7)
-				*new_sps_pps=check_sps_change(d,im) || *new_sps_pps;
+				*new_sps_pps=(check_sps_change(d,im) || *new_sps_pps);
 			if (nalu_type==8)
-				*new_sps_pps=check_pps_change(d,im) || *new_sps_pps;
+				*new_sps_pps=(check_pps_change(d,im) || *new_sps_pps);
 			if (start_picture || nalu_type==7/*SPS*/ || nalu_type==8/*PPS*/ ){
 				*dst++=0;
 				start_picture=FALSE;
@@ -250,11 +260,20 @@ static int nalusToFrame(DecData *d, MSQueue *naluq, bool_t *new_sps_pps){
 
 static void dec_process(MSFilter *f){
 	DecData *d=(DecData*)f->data;
-	mblk_t *im;
+	mblk_t *im, *om;
 	MSQueue nalus;
 
 	ms_queue_init(&nalus);
 	while((im=ms_queue_get(f->inputs[0]))!=NULL){
+		// Reset all contexts when an empty packet is received
+		if(msgdsize(im) == 0) {
+			rfc3984_uninit(&d->unpacker);
+			rfc3984_init(&d->unpacker);
+			dec_reinit(d);
+			ms_stream_regulator_reset(d->regulator);
+			freemsg(im);
+			continue;
+		}
 		/*push the sps/pps given in sprop-parameter-sets if any*/
 		if (d->packet_num==0 && d->sps && d->pps){
 			mblk_set_timestamp_info(d->sps,mblk_get_timestamp_info(im));
@@ -269,6 +288,9 @@ static void dec_process(MSFilter *f){
 			int size;
 			uint8_t *p,*end;
 			bool_t need_reinit=FALSE;
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(50,43,0) // backward compatibility with Debian Squeeze (6.0)
+			uint32_t frame_ts = mblk_get_timestamp_info(ms_queue_peek_first(&nalus));
+#endif
 
 			size=nalusToFrame(d,&nalus,&need_reinit);
 			if (need_reinit)
@@ -283,6 +305,9 @@ static void dec_process(MSFilter *f){
 				av_init_packet(&pkt);
 				pkt.data = p;
 				pkt.size = end-p;
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(50,43,0) // backward compatibility with Debian Squeeze (6.0)
+				pkt.pts = frame_ts;
+#endif
 				len=avcodec_decode_video2(&d->av_context,d->orig,&got_picture,&pkt);
 				if (len<=0) {
 					ms_warning("ms_AVdecoder_process: error %i.",len);
@@ -290,19 +315,22 @@ static void dec_process(MSFilter *f){
 					break;
 				}
 				if (got_picture) {
-					ms_queue_put(f->outputs[0],get_as_yuvmsg(f,d,d->orig));
-					if (!d->first_image_decoded) {
-						d->first_image_decoded = TRUE;
-						ms_filter_notify_no_arg(f,MS_VIDEO_DECODER_FIRST_IMAGE_DECODED);
-					}
-					if (ms_average_fps_update(&d->fps, f->ticker->time)) {
-						ms_message("ffmpeg H264 decoder: Frame size: %dx%d", d->outbuf.w,  d->outbuf.h);
-					}
+					ms_stream_regulator_push(d->regulator, get_as_yuvmsg(f,d,d->orig));
 				}
 				p+=len;
 			}
 		}
 		d->packet_num++;
+	}
+	while((om = ms_stream_regulator_get(d->regulator))) {
+		ms_queue_put(f->outputs[0], om);
+		if (!d->first_image_decoded) {
+			d->first_image_decoded = TRUE;
+			ms_filter_notify_no_arg(f,MS_VIDEO_DECODER_FIRST_IMAGE_DECODED);
+		}
+		if (ms_average_fps_update(&d->fps, f->ticker->time)) {
+			ms_message("ffmpeg H264 decoder: Frame size: %dx%d", d->vsize.width,  d->vsize.height);
+		}
 	}
 }
 
@@ -336,8 +364,8 @@ static int dec_get_vsize(MSFilter *f, void *data) {
 	DecData *d = (DecData *)f->data;
 	MSVideoSize *vsize = (MSVideoSize *)data;
 	if (d->first_image_decoded == TRUE) {
-		vsize->width = d->outbuf.w;
-		vsize->height = d->outbuf.h;
+		vsize->width = d->vsize.width;
+		vsize->height = d->vsize.height;
 	} else {
 		vsize->width = MS_VIDEO_SIZE_UNKNOWN_W;
 		vsize->height = MS_VIDEO_SIZE_UNKNOWN_H;
@@ -353,17 +381,17 @@ static int dec_get_fps(MSFilter *f, void *data){
 
 static int dec_get_outfmt(MSFilter *f, void *data){
 	DecData *s = (DecData *)f->data;
-	((MSPinFormat*)data)->fmt=ms_factory_get_video_format(f->factory,"YUV420P",ms_video_size_make(s->outbuf.w,s->outbuf.h),0,NULL);
+	((MSPinFormat*)data)->fmt=ms_factory_get_video_format(f->factory,"YUV420P",ms_video_size_make(s->vsize.width,s->vsize.height),0,NULL);
 	return 0;
 }
 
 static MSFilterMethod  h264_dec_methods[]={
-	{	MS_FILTER_ADD_FMTP	,	dec_add_fmtp	},
-	{	MS_VIDEO_DECODER_RESET_FIRST_IMAGE_NOTIFICATION, reset_first_image },
-	{	MS_FILTER_GET_VIDEO_SIZE,	dec_get_vsize	},
-	{	MS_FILTER_GET_FPS	,	dec_get_fps	},
-	{	MS_FILTER_GET_OUTPUT_FMT,	dec_get_outfmt	},
-	{	0			,	NULL	}
+	{	MS_FILTER_ADD_FMTP                                 ,	dec_add_fmtp      },
+	{	MS_VIDEO_DECODER_RESET_FIRST_IMAGE_NOTIFICATION    ,	reset_first_image },
+	{	MS_FILTER_GET_VIDEO_SIZE                           ,	dec_get_vsize     },
+	{	MS_FILTER_GET_FPS                                  ,	dec_get_fps       },
+	{	MS_FILTER_GET_OUTPUT_FMT                           ,	dec_get_outfmt    },
+	{	0                                                  ,	NULL              }
 };
 
 #ifndef _MSC_VER
@@ -379,8 +407,10 @@ MSFilterDesc ms_h264_dec_desc={
 	.init=dec_init,
 	.preprocess=dec_preprocess,
 	.process=dec_process,
+	.postprocess=dec_postprocess,
 	.uninit=dec_uninit,
-	.methods=h264_dec_methods
+	.methods=h264_dec_methods,
+	.flags=MS_FILTER_IS_PUMP
 };
 
 #else
@@ -397,9 +427,10 @@ MSFilterDesc ms_h264_dec_desc={
 	dec_init,
 	dec_preprocess,
 	dec_process,
-	NULL,
+	dec_postprocess,
 	dec_uninit,
-	h264_dec_methods
+	h264_dec_methods,
+	MS_FILTER_IS_PUMP
 };
 
 #endif

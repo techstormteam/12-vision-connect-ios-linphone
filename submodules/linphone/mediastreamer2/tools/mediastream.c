@@ -133,9 +133,7 @@ typedef struct _MediastreamDatas {
 	int ec_len_ms, ec_delay_ms, ec_framesize;
 	char* srtp_local_master_key;
 	char* srtp_remote_master_key;
-	int netsim_bw;
-	int netsim_lossrate;
-	int netsim_latency;
+	OrtpNetworkSimulatorParams netsim;
 	float zoom;
 	float zoom_cx, zoom_cy;
 
@@ -207,10 +205,13 @@ const char *usage="mediastream --local <port> --remote <ip:port> \n"
 								"[ --verbose (most verbose messages) ]\n"
 								"[ --video-windows-id <video surface:preview surface>]\n"
 								"[ --video-display-filter <name> ]\n"
-								"[ --srtp <local master_key> <remote master_key> (enable srtp, master key is generated if absent from comand line)\n"
-								"[ --netsim-bandwidth <bandwidth limit in bits/s> (simulates a network download bandwidth limit)\n"
-								"[ --netsim-lossrate <0-100> (simulates a network lost rate)\n"
-								"[ --netsim-latency <latency in ms> (simulates a network latency)\n"
+								"[ --srtp <local master_key> <remote master_key> (enable srtp, master key is generated if absent from comand line)]\n"
+								"[ --netsim-bandwidth <bandwidth limit in bits/s> (simulates a network download bandwidth limit)]\n"
+								"[ --netsim-lossrate <0-100> (simulates a network lost rate)]\n"
+								"[ --netsim-consecutive-loss-probability <0-1> (to simulate bursts of lost packets)]\n"
+								"[ --netsim-latency <latency in ms> (simulates a network latency)]\n"
+								"[ --netsim-jitter-strength <0-100> (strength of the jitter simulation)]\n"
+								"[ --netsim-jitter-burst-density <0-10> (density of gap/burst events, 1.0=one gap/burst per second in average)]\n" 
 								"[ --zoom zoomfactor]\n"
 								"[ --ice-local-candidate <ip:port:[host|srflx|prflx|relay]> ]\n"
 								"[ --ice-remote-candidate <ip:port:[host|srflx|prflx|relay]> ]\n"
@@ -485,7 +486,7 @@ bool_t parse_args(int argc, char** argv, MediastreamDatas* out) {
 			i++;
 			out->device_rotation=atoi(argv[i]);
 		} else if (strcmp(argv[i], "--srtp")==0) {
-			if (!media_stream_srtp_supported()) {
+			if (!ms_srtp_supported()) {
 				ms_error("srtp support not enabled");
 				return FALSE;
 			}
@@ -498,22 +499,76 @@ bool_t parse_args(int argc, char** argv, MediastreamDatas* out) {
 			}
 		} else if (strcmp(argv[i],"--netsim-bandwidth")==0){
 			i++;
-			out->netsim_bw=atoi(argv[i]);
-		} else if (strcmp(argv[i],"--netsim-lossrate")==0){
-			i++;
-			out->netsim_lossrate=atoi(argv[i]);
-			if(out->netsim_lossrate < 0) {
-				ms_warning("%d < 0, wrong value for --lost-rate: set to 0", out->netsim_lossrate);
-				out->netsim_lossrate=0;
+			if (i<argc){
+				out->netsim.max_bandwidth=atoi(argv[i]);
+				out->netsim.enabled=TRUE;
+			}else{
+				ms_error("Missing argument for --netsim-bandwidth");
+				return FALSE;
 			}
-			if(out->netsim_lossrate > 100) {
-				ms_warning("%d > 100, wrong value for --lost-rate: set to 100", out->netsim_lossrate);
-				out->netsim_lossrate=100;
-			}
-		} else if (strcmp(argv[i], "--netsim-latency") == 0) {
+		}else if (strcmp(argv[i],"--netsim-lossrate")==0){
 			i++;
-			out->netsim_latency = atoi(argv[i]);
-		} else if (strcmp(argv[i],"--zoom")==0){
+			if (i<argc){
+				out->netsim.loss_rate=atoi(argv[i]);
+				if (out->netsim.loss_rate < 0 || out->netsim.loss_rate>100) {
+					ms_error("Loss rate must be between 0 and 100.");
+					return FALSE;
+				}
+				out->netsim.enabled=TRUE;
+			}else{
+				ms_error("Missing argument for --netsim-lossrate");
+				return FALSE;
+			}
+		}else if (strcmp(argv[i],"--netsim-consecutive-loss-probability")==0){
+			i++;
+			if (i<argc){
+				sscanf(argv[i],"%f",&out->netsim.consecutive_loss_probability);
+				if (out->netsim.consecutive_loss_probability < 0 || out->netsim.consecutive_loss_probability>1) {
+					ms_error("The consecutive loss probability must be between 0 and 1.");
+					return FALSE;
+				}
+				
+				out->netsim.enabled=TRUE;
+			}else{
+				ms_error("Missing argument for --netsim-consecutive-loss-probability");
+				return FALSE;
+			}
+		}else if (strcmp(argv[i], "--netsim-latency") == 0) {
+			i++;
+			if (i<argc){
+				out->netsim.latency = atoi(argv[i]);
+				out->netsim.enabled=TRUE;
+			}else{
+				ms_error("Missing argument for --netsim-latency");
+				return FALSE;
+			}
+		}else if (strcmp(argv[i], "--netsim-jitter-burst-density") == 0) {
+			i++;
+			if (i<argc){
+				sscanf(argv[i],"%f",&out->netsim.jitter_burst_density);
+				if (out->netsim.jitter_burst_density<0 || out->netsim.jitter_burst_density>10){
+					ms_error("The jitter burst density must be between 0 and 10");
+					return FALSE;
+				}
+				out->netsim.enabled=TRUE;
+			}else{
+				ms_error("Missing argument for --netsim-jitter-burst-density");
+				return FALSE;
+			}
+		}else if (strcmp(argv[i], "--netsim-jitter-strength") == 0) {
+			i++;
+			if (i<argc){
+				sscanf(argv[i],"%f",&out->netsim.jitter_strength);
+				if (out->netsim.jitter_strength<0 || out->netsim.jitter_strength>100){
+					ms_error("The jitter strength must be between 0 and 100.");
+					return FALSE;
+				}
+				out->netsim.enabled=TRUE;
+			}else{
+				ms_error("Missing argument for --netsim-jitter-strength");
+				return FALSE;
+			}
+		}else if (strcmp(argv[i],"--zoom")==0){
 			i++;
 			if (sscanf(argv[i], "%f,%f,%f", &out->zoom, &out->zoom_cx, &out->zoom_cy) != 3) {
 				ms_error("Invalid zoom triplet");
@@ -548,6 +603,10 @@ bool_t parse_args(int argc, char** argv, MediastreamDatas* out) {
 			return FALSE;
 		}
 	}
+	if (out->netsim.jitter_burst_density>0 && out->netsim.max_bandwidth==0){
+		ms_error("Jitter probability settings requires --netsim-bandwidth to be set.");
+		return FALSE;
+	}
 	return TRUE;
 }
 
@@ -569,7 +628,6 @@ static void video_stream_event_cb(void *user_pointer, const MSFilter *f, const u
 
 void setup_media_streams(MediastreamDatas* args) {
 	/*create the rtp session */
-	OrtpNetworkSimulatorParams params={0};
 #ifdef VIDEO_ENABLED
 	MSWebCam *cam=NULL;
 #endif
@@ -583,6 +641,7 @@ void setup_media_streams(MediastreamDatas* args) {
 		ortp_set_log_level_mask(ORTP_MESSAGE|ORTP_WARNING|ORTP_ERROR|ORTP_FATAL);
 	}
 
+    ms_init();
 
 #if TARGET_OS_IPHONE || defined(ANDROID)
 #if defined (HAVE_X264) && defined (VIDEO_ENABLED)
@@ -620,7 +679,6 @@ void setup_media_streams(MediastreamDatas* args) {
 	args->profile=rtp_profile_clone_full(&av_profile);
 	args->q=ortp_ev_queue_new();
 
-	ms_init();
 	if (args->mtu) ms_set_mtu(args->mtu);
 	ms_filter_enable_statistics(TRUE);
 	ms_filter_reset_statistics();
@@ -649,7 +707,7 @@ void setup_media_streams(MediastreamDatas* args) {
 	if (args->bitrate>0) args->pt->normal_bitrate=args->bitrate;
 
 	if (args->pt->normal_bitrate==0){
-		printf("Error: no default bitrate specified for codec %s/%i. "
+		fprintf(stderr,"Error: no default bitrate specified for codec %s/%i. "
 			"Please specify a network bitrate with --bitrate option.\n",args->pt->mime_type,args->pt->clock_rate);
 		exit(-1);
 	}
@@ -747,7 +805,7 @@ void setup_media_streams(MediastreamDatas* args) {
 
             #ifndef TARGET_OS_IPHONE
 			if (args->zrtp_secrets != NULL) {
-				OrtpZrtpParams params;
+				MSZrtpParams params;
 				params.zid_file=args->zrtp_secrets;
 				audio_stream_enable_zrtp(args->audio,&params);
 			}
@@ -826,22 +884,9 @@ void setup_media_streams(MediastreamDatas* args) {
 	ice_session_choose_default_remote_candidates(args->ice_session);
 	ice_session_start_connectivity_checks(args->ice_session);
 
-	if (args->netsim_bw>0){
-		params.enabled=TRUE;
-		params.max_bandwidth=args->netsim_bw;
+	if (args->netsim.enabled){
+		rtp_session_enable_network_simulation(args->session,&args->netsim);
 	}
-	if (args->netsim_lossrate>0){
-		params.enabled=TRUE;
-		params.loss_rate=args->netsim_lossrate;
-	}
-	if (args->netsim_latency > 0) {
-		params.enabled = TRUE;
-		params.latency = args->netsim_latency;
-	}
-	if (params.enabled){
-		rtp_session_enable_network_simulation(args->session,&params);
-	}
-
 }
 
 
@@ -890,12 +935,14 @@ static void mediastream_tool_iterate(MediastreamDatas* args) {
 					}
 					printf("\nOK\n");
 				}else if (sscanf(commands,"lossrate %i",&intarg)==1){
-					OrtpNetworkSimulatorParams params={0};
-					params.enabled=TRUE;
-					params.loss_rate=intarg;
-					rtp_session_enable_network_simulation(args->session,&params);
-				}
-				else if (strstr(commands,"quit")){
+					args->netsim.enabled=TRUE;
+					args->netsim.loss_rate=intarg;
+					rtp_session_enable_network_simulation(args->session,&args->netsim);
+				}else if (sscanf(commands,"bandwidth %i",&intarg)==1){
+					args->netsim.enabled=TRUE;
+					args->netsim.max_bandwidth=intarg;
+					rtp_session_enable_network_simulation(args->session,&args->netsim);
+				}else if (strstr(commands,"quit")){
 					cond=0;
 				}else printf("Cannot understand this.\n");
 			}
@@ -992,8 +1039,8 @@ JNIEXPORT jint JNICALL  JNI_OnLoad(JavaVM *ajvm, void *reserved)
 
 JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_setVideoWindowId
   (JNIEnv *env, jobject obj, jobject id, jint _args) {
-	MediastreamDatas* args =  (MediastreamDatas*)_args;
 #ifdef VIDEO_ENABLED
+	MediastreamDatas* args =  (MediastreamDatas*)_args;
 	if (!args->video)
 		return;
 	video_stream_set_native_window_id(args->video,(unsigned long)id);
@@ -1002,8 +1049,8 @@ JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_setVi
 
 JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_setVideoPreviewWindowId
   (JNIEnv *env, jobject obj, jobject id, jint _args) {
-	MediastreamDatas* args =  (MediastreamDatas*)_args;
 #ifdef VIDEO_ENABLED
+	MediastreamDatas* args =  (MediastreamDatas*)_args;
 	if (!args->video)
 		return;
 	video_stream_set_native_preview_window_id(args->video,(unsigned long)id);
@@ -1012,8 +1059,8 @@ JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_setVi
 
 JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_setDeviceRotation
   (JNIEnv *env, jobject thiz, jint rotation, jint _args) {
-	MediastreamDatas* args =  (MediastreamDatas*)_args;
 #ifdef VIDEO_ENABLED
+	MediastreamDatas* args =  (MediastreamDatas*)_args;
 	if (!args->video)
 		return;
 	video_stream_set_device_rotation(args->video, rotation);
@@ -1022,8 +1069,8 @@ JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_setDe
 
 JNIEXPORT void JNICALL Java_org_linphone_mediastream_MediastreamerActivity_changeCamera
   (JNIEnv *env, jobject obj, jint camId, jint _args) {
-	MediastreamDatas* args =  (MediastreamDatas*)_args;
 #ifdef VIDEO_ENABLED
+	MediastreamDatas* args =  (MediastreamDatas*)_args;
 	if (!args->video)
 		return;
 	char* id = (char*)malloc(15);

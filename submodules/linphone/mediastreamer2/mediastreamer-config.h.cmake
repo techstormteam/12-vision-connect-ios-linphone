@@ -49,6 +49,10 @@
 #cmakedefine WORDS_BIGENDIAN
 
 #cmakedefine MS_FIXED_POINT
+#cmakedefine HAVE_SRTP
+#cmakedefine HAVE_ZRTP
+#cmakedefine HAVE_DTLS
+
 #cmakedefine __ALSA_ENABLED__
 #cmakedefine __ARTS_ENABLED__
 #cmakedefine __MACSND_ENABLED__
@@ -56,10 +60,10 @@
 #cmakedefine __PORTAUDIO_ENABLED__
 #cmakedefine __PULSEAUDIO_ENABLED__
 #cmakedefine __QSA_ENABLED__
-#cmakedefine ORTP_HAVE_SRTP
 #cmakedefine HAVE_SPEEXDSP
 #cmakedefine PACKAGE_PLUGINS_DIR "${PACKAGE_PLUGINS_DIR}"
 #cmakedefine PACKAGE_DATA_DIR "${PACKAGE_DATA_DIR}"
+#cmakedefine PLUGINS_EXT "${PLUGINS_EXT}"
 
 #cmakedefine HAVE_LIBAVCODEC_AVCODEC_H 1
 #cmakedefine HAVE_LIBSWSCALE_SWSCALE_H 1
@@ -72,5 +76,6 @@
 #cmakedefine HAVE_GL 1
 #cmakedefine HAVE_X11_XLIB_H 1
 #cmakedefine HAVE_XV 1
-#cmakedefine HAVE_LINUX_VIDEODEV_H
-#cmakedefine HAVE_LINUX_VIDEODEV2_H
+#cmakedefine HAVE_LINUX_VIDEODEV_H 1
+#cmakedefine HAVE_LINUX_VIDEODEV2_H 1
+#cmakedefine HAVE_POLARSSL_SSL_H 1

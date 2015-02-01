@@ -55,6 +55,8 @@
 #define MAX_TRACE_LOG_SIZE	(50 * (1<<20))	// max trace log size: 50 MB, overwrite occur if log file size exceeds this size
 #endif//MAX_TRACE_LOG_SIZE
 
+#define STATISTICS_LOG_INTERVAL_MS (5000) // output statistics log every 5s
+
 /* MB width in pixels for specified colorspace I420 usually used in codec */
 #define MB_WIDTH_LUMA		16
 #define MB_WIDTH_CHROMA		(MB_WIDTH_LUMA>>1)
@@ -103,7 +105,7 @@
 
 #define ALIGN_RBSP_LEN_FIX		4
 
-#define PADDING_LENGTH			32 // reference extension
+
 #define INTPEL_NEEDED_MARGIN	(3)  // for safe sub-pel MC
 
 #define I420_PLANES				3
@@ -149,7 +151,6 @@
 #define MAX_SHORT_REF_COUNT		(MAX_GOP_SIZE>>1) // 16 in standard, maximal count number of short reference pictures
 #define LONG_TERM_REF_NUM       2
 #define LONG_TERM_REF_NUM_SCREEN 4
-#define MAX_LONG_REF_COUNT		2 // 16 in standard, maximal count number of long reference pictures
 #define MAX_REF_PIC_COUNT		16 // 32 in standard, maximal Short + Long reference pictures
 #define MIN_REF_PIC_COUNT		1		// minimal count number of reference pictures, 1 short + 2 key reference based?
 #define MAX_MULTI_REF_PIC_COUNT	1	//maximum multi-reference number
@@ -159,7 +160,8 @@
 // adjusted numbers reference picture functionality related definition
 #define MAX_REFERENCE_MMCO_COUNT_NUM		4	// adjusted MAX_MMCO_COUNT(66 in standard) definition per encoder design
 #define MAX_REFERENCE_REORDER_COUNT_NUM		2	// adjusted MAX_REF_PIC_COUNT(32 in standard) for reference reordering definition per encoder design
-#define MAX_REFERENCE_PICTURE_COUNT_NUM		(MAX_SHORT_REF_COUNT+MAX_LONG_REF_COUNT)	// <= MAX_REF_PIC_COUNT, memory saved if <
+#define MAX_REFERENCE_PICTURE_COUNT_NUM_CAMERA		(MAX_SHORT_REF_COUNT+LONG_TERM_REF_NUM)	// <= MAX_REF_PIC_COUNT, memory saved if <
+#define MAX_REFERENCE_PICTURE_COUNT_NUM_SCREEN		(MAX_SHORT_REF_COUNT+LONG_TERM_REF_NUM_SCREEN)	// <= MAX_REF_PIC_COUNT, memory saved if <
 
 #define BASE_QUALITY_ID			0
 #define BASE_DEPENDENCY_ID		0
@@ -176,16 +178,24 @@
 #define MAX_ACCESS_UINT_CAPACITY	(1<<20)	// Maximal AU capacity in bytes: 1024 KB predefined
 #define MAX_ACCESS_UNIT_CACHE_NUM	2	// Maximal Access Unit(AU) cache number to be processed, denote current AU and the next coming AU.
 
+#define SLICE_NUM_EXPAND_COEF 2
+
 enum {
-  BLOCK_16x16 = 0,
-  BLOCK_16x8  = 1,
-  BLOCK_8x16  = 2,
-  BLOCK_8x8   = 3,
-  BLOCK_4x4   = 4,
+BLOCK_16x16 = 0,
+BLOCK_16x8  = 1,
+BLOCK_8x16  = 2,
+BLOCK_8x8   = 3,
+BLOCK_4x4   = 4,
 //    BLOCK_8x4   = 5,
 //    BLOCK_4x8   = 6,
-  BLOCK_SIZE_ALL = 5
+BLOCK_SIZE_ALL = 5
 };
+
+typedef enum {
+RECIEVE_UNKOWN = 0,
+RECIEVE_SUCCESS = 1,
+RECIEVE_FAILED = 2
+} LTR_MARKING_RECEIVE_STATE;
 
 enum {
   CUR_AU_IDX	= 0,			// index symbol for current access unit
@@ -200,6 +210,7 @@ enum {
   ENC_RETURN_CORRECTED = 0x08, //unexpected value but corrected by encoder
   ENC_RETURN_INVALIDINPUT = 0x10, //invalid input
   ENC_RETURN_MEMOVERFLOWFOUND = 0x20,
+  ENC_RETURN_VLCOVERFLOWFOUND = 0x40
 };
 //TODO: need to complete the return checking in encoder and fill in more types if needed
 

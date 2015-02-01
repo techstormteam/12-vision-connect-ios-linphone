@@ -20,6 +20,7 @@ package org.linphone.core;
 
 import java.util.Vector;
 
+import org.linphone.core.LinphoneCoreListener.LinphoneEchoCalibrationListener;
 import org.linphone.mediastream.video.AndroidVideoWindowImpl;
 import org.linphone.mediastream.video.capture.hwconf.AndroidCameraConfiguration;
 
@@ -424,6 +425,45 @@ public interface LinphoneCore {
 				if (mstate.mValue == value) return mstate;
 			}
 			throw new RuntimeException("UpnpState not found [" + value + "]");
+		}
+		public String toString() {
+			return mStringValue;
+		}
+	}
+	/**
+	 * linphone log collection upload states
+	 */
+	static public class LogCollectionUploadState {
+
+		static private Vector<LogCollectionUploadState> values = new Vector<LogCollectionUploadState>();
+		/**
+		 * Delivery in progress
+		 */
+		static public LogCollectionUploadState LogCollectionUploadStateInProgress = new LogCollectionUploadState(0,"LinphoneCoreLogCollectionUploadStateInProgress");
+		/**
+		 * Log collection upload successfully delivered and acknowledged by remote end point
+		 */
+		static public LogCollectionUploadState LogCollectionUploadStateDelivered = new LogCollectionUploadState(1,"LinphoneCoreLogCollectionUploadStateDelivered");
+		/**
+		 * Log collection upload was not delivered
+		 */
+		static public LogCollectionUploadState LogCollectionUploadStateNotDelivered = new LogCollectionUploadState(2,"LinphoneCoreLogCollectionUploadStateNotDelivered");
+
+		private final int mValue;
+		private final String mStringValue;
+
+		private LogCollectionUploadState(int value, String stringValue) {
+			mValue = value;
+			values.addElement(this);
+			mStringValue=stringValue;
+		}
+		public static LogCollectionUploadState fromInt(int value) {
+
+			for (int i=0; i<values.size();i++) {
+				LogCollectionUploadState state = (LogCollectionUploadState) values.elementAt(i);
+				if (state.mValue == value) return state;
+			}
+			throw new RuntimeException("state not found ["+value+"]");
 		}
 		public String toString() {
 			return mStringValue;
@@ -1036,6 +1076,20 @@ public interface LinphoneCore {
 	VideoSize getPreferredVideoSize();
 
 	/**
+	 * Set the preferred frame rate for video.
+	 * Based on the available bandwidth constraints and network conditions, the video encoder
+	 * remains free to lower the framerate. There is no warranty that the preferred frame rate be the actual framerate.
+	 * used during a call. Default value is 0, which means "use encoder's default fps value".
+	 * @param fps the target frame rate in number of frames per seconds.
+	**/
+	void setPreferredFramerate(float fps);
+	
+	/**
+	 * Returns the preferred video framerate, previously set by setPreferredFramerate().
+	 * @return frame rate in number of frames per seconds.
+	**/
+	float getPreferredFramerate();
+	/**
 	 * Returns the currently supported audio codecs, as PayloadType elements
 	 * @return
 	 */
@@ -1057,10 +1111,10 @@ public interface LinphoneCore {
 	/**
 	 * Start an echo calibration of the sound devices, in order to find adequate settings for the echo canceler automatically.
 	 * status is notified to {@link LinphoneCoreListener#ecCalibrationStatus(EcCalibratorStatus, int, Object)}
-	 * @param User object
+	 * @param listener the LinphoneEchoCalibrationListener to call when the calibration is done
 	 * @throws LinphoneCoreException if operation is still in progress;
 	**/
-	void startEchoCalibration(Object data) throws LinphoneCoreException;
+	void startEchoCalibration(LinphoneEchoCalibrationListener listener) throws LinphoneCoreException;
 
 	/**
 	 * Returns true if echo calibration is recommended.
@@ -1787,4 +1841,33 @@ public interface LinphoneCore {
 	 * @return An object that implement LinphonePlayer
 	 */
 	public LinphonePlayer createLocalPlayer(AndroidVideoWindowImpl window);
+	
+	/**
+	 * Adds a new listener to be called by the core
+	 * @param listener to add
+	 */
+	public void addListener(LinphoneCoreListener listener);
+	
+	/**
+	 * Removes a listener previously added with addListener
+	 * @param listener to remove
+	 */
+	public void removeListener(LinphoneCoreListener listener);
+	
+	/**
+	 * Specifies a ring back tone to be played to far end during incoming calls, when early media is requested.
+	 * @param file
+	 */
+	public void setRemoteRingbackTone(String file);
+
+	/**
+	 * Return the ringback tone file used when doing early media. It may be null.
+	 * @return the ringback tone file path.
+	 */
+	String getRemoteRingbackTone();
+	
+	/**
+	 * Upload the log collection to the configured server url.
+	 */
+	public void uploadLogCollection();
 }

@@ -134,7 +134,7 @@ static void capture_queue_cleanup(void* p) {
 	
 	/* Set the layer */
 	AVCaptureVideoPreviewLayer *previewLayer = (AVCaptureVideoPreviewLayer *)self.layer;
-	[previewLayer setOrientation:AVCaptureVideoOrientationPortrait];
+	[previewLayer.connection setVideoOrientation:AVCaptureVideoOrientationPortrait];
 	[previewLayer setBackgroundColor:[[UIColor clearColor] CGColor]];
 	[previewLayer setOpaque:YES];
 	start_time=0;
@@ -236,7 +236,7 @@ static void capture_queue_cleanup(void* p) {
 				case 0:
 				case 180:
 					if (mOutputVideoSize.width*factor>plane_width || mOutputVideoSize.height*factor>plane_height) {
-						ms_warning("[1]IOS capture discarding frame because wrong dimensions (%d > %d || %d > %d)",
+						ms_warning("[1]IOS capture discarding frame because wrong dimensions (%d > %zu || %d > %zu)",
 								   mOutputVideoSize.width*factor, plane_width,
 								   mOutputVideoSize.height*factor, plane_height);
 						return;
@@ -245,7 +245,7 @@ static void capture_queue_cleanup(void* p) {
 				case 90:
 				case 270:
 					if (mOutputVideoSize.width*factor>plane_height || mOutputVideoSize.height*factor>plane_width) {
-						ms_warning("[2]	IOS capture discarding frame because wrong dimensions (%d > %d || %d > %d)",
+						ms_warning("[2]	IOS capture discarding frame because wrong dimensions (%d > %zu || %d > %zu)",
 								   mOutputVideoSize.width*factor, plane_height,
 								   mOutputVideoSize.height*factor, plane_width);
 						return;
@@ -277,31 +277,39 @@ static void capture_queue_cleanup(void* p) {
 	}
 }
 
-- (void)openDevice:(const char*) deviceId {
+- (void)openDevice:(const char*) device_Id {
 	NSError *error = nil;
 	unsigned int i = 0;
 	AVCaptureDevice * device = NULL;
-	self->deviceId = deviceId;
+	self->deviceId = device_Id;
 	
 	NSArray * array = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
 	for (i = 0 ; i < [array count]; i++) {
 		AVCaptureDevice * currentDevice = [array objectAtIndex:i];
-		if(!strcmp([[currentDevice uniqueID] UTF8String], deviceId)) {
+		if(!strcmp([[currentDevice uniqueID] UTF8String], device_Id)) {
 			device = currentDevice;
 			break;
 		}
 	}
 	if (device == NULL) {
-		ms_error("Error: camera %s not found, using default one", deviceId);
+		ms_error("Error: camera %s not found, using default one", device_Id);
 		device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
 	}
 	input = [AVCaptureDeviceInput deviceInputWithDevice:device
 												  error:&error];
-	[input retain]; // keep reference on an externally allocated object
-	
+
 	AVCaptureSession *session = [(AVCaptureVideoPreviewLayer *)self.layer session];
-	[session addInput:input];
-	[session addOutput:output];
+	if ( input && [session canAddInput:input] ){
+		[input retain]; // keep reference on an externally allocated object
+		[session addInput:input];
+	} else {
+		ms_error("Error: input nil or cannot be added: %p", input);
+	}
+	if( output && [session canAddOutput:output] ){
+		[session addOutput:output];
+	} else {
+		ms_error("Error: output nil or cannot be added: %p", output);
+	}
 }
 
 - (void)dealloc {
@@ -468,16 +476,22 @@ static AVCaptureVideoOrientation Angle2AVCaptureVideoOrientation(int deviceOrien
 	@synchronized(self) {
 		AVCaptureSession *session = [(AVCaptureVideoPreviewLayer *)self.layer session];
 		[session beginConfiguration];
-		if ([[[UIDevice currentDevice] systemVersion] floatValue] < 5) { 
-			[output setMinFrameDuration:CMTimeMake(1, value)];
+
+		if( [[[UIDevice currentDevice] systemVersion] floatValue] >= 7 ){
+			for( AVCaptureDeviceInput* devinput in [session inputs] ) {
+				[devinput.device setActiveVideoMinFrameDuration:CMTimeMake(1, value)];
+				[devinput.device setActiveVideoMaxFrameDuration:CMTimeMake(1, value)];
+				break;
+			}
 		} else {
+			// Pre-iOS7 method
 			NSArray *connections = output.connections;
 			if ([connections count] > 0) {
 				[[connections objectAtIndex:0] setVideoMinFrameDuration:CMTimeMake(1, value)];
 				[[connections objectAtIndex:0] setVideoMaxFrameDuration:CMTimeMake(1, value)];
 			} 
-			
 		}
+
 		fps=value;
 		snprintf(fps_context, sizeof(fps_context), "Captured mean fps=%%f, expected=%f", fps);
 		ms_video_init_average_fps(&averageFps, fps_context);
@@ -565,7 +579,7 @@ static void ioscapture_postprocess(MSFilter *f) {
 static int ioscapture_get_fps(MSFilter *f, void *arg) {
 	IOSCapture *thiz = (IOSCapture*)f->data;
 	if (thiz != NULL) {
-		*((float*)arg) = thiz->fps;
+		*((float*)arg) = ms_average_fps_get(&thiz->averageFps);
 	}
 	return 0;
 }
@@ -643,8 +657,8 @@ static int ioscapture_set_device_orientation_display (MSFilter *f, void *arg) {
 	IOSCapture *thiz=(IOSCapture*)f->data;
 	if (thiz != NULL) {
 		AVCaptureVideoPreviewLayer *previewLayer = (AVCaptureVideoPreviewLayer *)thiz.layer;
-		if ([previewLayer isOrientationSupported])
-			previewLayer.orientation = Angle2AVCaptureVideoOrientation(*(int*)(arg));
+		if ([previewLayer.connection isVideoOrientationSupported])
+			previewLayer.connection.videoOrientation = Angle2AVCaptureVideoOrientation(*(int*)(arg));
 	}
 	return 0;
 }

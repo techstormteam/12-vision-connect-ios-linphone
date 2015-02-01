@@ -88,11 +88,19 @@ static int msopenh264_dec_get_fps(MSFilter *f, void *arg){
 	return 0;
 }
 
+static int msopenh264_dec_get_out_fmt(MSFilter *f, void *arg){
+	MSOpenH264Decoder *d = static_cast<MSOpenH264Decoder *>(f->data);
+	((MSPinFormat*)arg)->pin=0;
+	((MSPinFormat*)arg)->fmt=d->getOutFmt();
+	return 0;
+}
+
 static MSFilterMethod msopenh264_dec_methods[] = {
 	{ MS_FILTER_ADD_FMTP,                              msopenh264_dec_add_fmtp          },
 	{ MS_VIDEO_DECODER_RESET_FIRST_IMAGE_NOTIFICATION, msopenh264_dec_reset_first_image },
 	{ MS_FILTER_GET_VIDEO_SIZE,                        msopenh264_dec_get_size          },
 	{ MS_FILTER_GET_FPS,                               msopenh264_dec_get_fps           },
+	{ MS_FILTER_GET_OUTPUT_FMT,                        msopenh264_dec_get_out_fmt       },
 	{ 0,                                               NULL                             }
 };
 
@@ -329,7 +337,9 @@ MSFilterDesc msopenh264_enc_desc = {
 #endif
 
 MS_PLUGIN_DECLARE(void) libmsopenh264_init(void){
+#ifdef OPENH264_DECODER_ENABLED
 	ms_filter_register(&msopenh264_dec_desc);
+#endif
 	ms_filter_register(&msopenh264_enc_desc);
 	ms_message("msopenh264-" VERSION " plugin registered.");
 }

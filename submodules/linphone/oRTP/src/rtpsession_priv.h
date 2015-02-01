@@ -43,6 +43,7 @@ typedef enum {
 	RTCP_OVERRIDE_JITTER=1<<12,
 	RTCP_OVERRIDE_DELAY=1<<13,
 	RTP_SESSION_RECV_SEQ_INIT=1<<14,
+	RTP_SESSION_FLUSH=1<<15
 }RtpSessionFlags;
 
 #define rtp_session_using_transport(s, stream) (((s)->flags & RTP_SESSION_USING_TRANSPORT) && (s->stream.gs.tr != 0))
@@ -77,4 +78,11 @@ void rtp_session_send_regular_rtcp_packet_and_reschedule(RtpSession *session, ui
 void rtp_session_send_fb_rtcp_packet_and_reschedule(RtpSession *session);
 
 void ortp_stream_clear_aux_addresses(OrtpStream *os);
+/*
+ * no more public, use modifier instead
+ * */
+void rtp_session_set_transports(RtpSession *session, RtpTransport *rtptr, RtpTransport *rtcptr);
+
+ORTP_PUBLIC bool_t rtp_profile_is_telephone_event(const RtpProfile *prof, int pt);
+
 #endif

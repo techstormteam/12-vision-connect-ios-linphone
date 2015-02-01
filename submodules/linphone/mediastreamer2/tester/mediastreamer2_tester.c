@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "mediastreamer2_tester.h"
+#include "mediastreamer2_tester_private.h"
 
 #include <mediastreamer2/mediastream.h>
 #if HAVE_CONFIG_H
@@ -26,15 +27,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <stdio.h>
 #include "CUnit/Basic.h"
+#include "CUnit/Automated.h"
 #if HAVE_CU_CURSES
 #include "CUnit/CUCurses.h"
 #endif
 #ifdef __APPLE__
 #include "TargetConditionals.h"
 #endif
+
+
 static test_suite_t **test_suite = NULL;
 static int nb_test_suites = 0;
+static const char* tester_fileroot = SOUND_FILE_PATH;
+static const char* tester_writable_dir= WRITE_FILE_PATH;
 
+static unsigned char xml = 0;
+static const char *xml_file = "CUnitAutomated-Results.xml";
+static char *xml_tmp_file = NULL;
 
 #if HAVE_CU_CURSES
 static unsigned char curses = 0;
@@ -94,6 +103,23 @@ static void list_suites() {
 }
 #endif
 
+
+const char* mediastreamer2_tester_get_file_root(){
+    return tester_fileroot;
+}
+
+void mediastreamer2_tester_set_file_root(const char* fileroot){
+    tester_fileroot = fileroot;
+}
+
+const char* mediastreamer2_tester_get_writable_dir(){
+    return tester_writable_dir;
+}
+void mediastreamer2_tester_set_writable_dir(const char* writable_dir){
+    tester_writable_dir = writable_dir;
+}
+
+
 int mediastreamer2_tester_nb_test_suites(void) {
 	return nb_test_suites;
 }
@@ -128,7 +154,9 @@ void mediastreamer2_tester_init(void) {
 #endif
 	add_test_suite(&framework_test_suite);
 	add_test_suite(&player_test_suite);
-
+#ifdef __ARM_NEON__
+    add_test_suite(&neon_test_suite);
+#endif
 	for (i = 0; i < mediastreamer2_tester_nb_test_suites(); i++) {
 		run_test_suite(test_suite[i]);
 	}
@@ -143,47 +171,100 @@ void mediastreamer2_tester_uninit(void) {
 	}
 }
 
+
+
+	/*derivated from cunit*/
+static void test_complete_message_handler(const CU_pTest pTest,
+											const CU_pSuite pSuite,
+											const CU_pFailureRecord pFailureList) {
+	int i;
+	CU_pFailureRecord pFailure = pFailureList;
+
+	if (pFailure) {
+		ms_warning("Suite [%s], Test [%s] had failures:", pSuite->pName, pTest->pName);
+	} else {
+		ms_warning(" passed");
+	}
+	for (i = 1 ; (NULL != pFailure) ; pFailure = pFailure->pNext, i++) {
+		ms_warning("\n    %d. %s:%u  - %s", i,
+			(NULL != pFailure->strFileName) ? pFailure->strFileName : "",
+			pFailure->uiLineNumber,
+			(NULL != pFailure->strCondition) ? pFailure->strCondition : "");
+	}
+}
+
+static void test_all_tests_complete_message_handler(const CU_pFailureRecord pFailure) {
+	ms_warning("\n\n %s",CU_get_run_results_string());
+}
+
+static void test_suite_init_failure_message_handler(const CU_pSuite pSuite) {
+	ms_warning("Suite initialization failed for [%s].", pSuite->pName);
+}
+
+static void test_suite_cleanup_failure_message_handler(const CU_pSuite pSuite) {
+	ms_warning("Suite cleanup failed for '%s'.", pSuite->pName);
+}
+
+static void test_start_message_handler(const CU_pTest pTest, const CU_pSuite pSuite) {
+	ms_warning("Suite [%s] Test [%s]", pSuite->pName,pTest->pName);
+}
+static void test_suite_start_message_handler(const CU_pSuite pSuite) {
+	ms_warning("Suite [%s]", pSuite->pName);
+}
+
 int mediastreamer2_tester_run_tests(const char *suite_name, const char *test_name) {
 	int ret;
 
+	CU_set_test_start_handler(test_start_message_handler);
+	CU_set_test_complete_handler(test_complete_message_handler);
+	CU_set_all_test_complete_handler(test_all_tests_complete_message_handler);
+	CU_set_suite_init_failure_handler(test_suite_init_failure_message_handler);
+	CU_set_suite_cleanup_failure_handler(test_suite_cleanup_failure_message_handler);
+	CU_set_suite_start_handler(test_suite_start_message_handler);
+
+	if( xml ){
+		xml_tmp_file = ms_strdup_printf("%s.tmp", xml_file);
+		CU_set_output_filename(xml_tmp_file);
+		CU_automated_run_tests();
+	} else {
 #if HAVE_CU_GET_SUITE
-	if (suite_name){
-		CU_pSuite suite;
-		CU_basic_set_mode(CU_BRM_VERBOSE);
-		suite=CU_get_suite(suite_name);
-		if (!suite) {
-			fprintf(stderr, "Could not find suite '%s'. Available suites are:\n", suite_name);
-			list_suites();
-		} else if (test_name) {
-			CU_pTest test=CU_get_test_by_name(test_name, suite);
-			if (!test) {
-				fprintf(stderr, "Could not find test '%s' in suite '%s'. Available tests are:\n", test_name, suite_name);
-				// do not use suite_name here, since this method is case sentisitive
-				list_suite_tests(suite->pName);
+		if (suite_name){
+			CU_pSuite suite;
+			CU_basic_set_mode(CU_BRM_VERBOSE);
+			suite=CU_get_suite(suite_name);
+			if (!suite) {
+				fprintf(stderr, "Could not find suite '%s'. Available suites are:\n", suite_name);
+				list_suites();
+			} else if (test_name) {
+				CU_pTest test=CU_get_test_by_name(test_name, suite);
+				if (!test) {
+					fprintf(stderr, "Could not find test '%s' in suite '%s'. Available tests are:\n", test_name, suite_name);
+					// do not use suite_name here, since this method is case sentisitive
+					list_suite_tests(suite->pName);
+				} else {
+					CU_ErrorCode err= CU_basic_run_test(suite, test);
+					if (err != CUE_SUCCESS) fprintf(stderr, "CU_basic_run_test error=%d\n", err);
+				}
 			} else {
-				CU_ErrorCode err= CU_basic_run_test(suite, test);
-				if (err != CUE_SUCCESS) fprintf(stderr, "CU_basic_run_test error=%d\n", err);
+				CU_basic_run_suite(suite);
 			}
-		} else {
-			CU_basic_run_suite(suite);
-		}
-	} else
-#endif
-	{
-#if HAVE_CU_CURSES
-		if (curses) {
-			/* Run tests using the CUnit curses interface */
-			CU_curses_run_tests();
-		}
-		else
+		} else
 #endif
 		{
-			/* Run all tests using the CUnit Basic interface */
-			CU_basic_set_mode(CU_BRM_VERBOSE);
-			CU_basic_run_tests();
+#if HAVE_CU_CURSES
+			if (curses) {
+				/* Run tests using the CUnit curses interface */
+				CU_curses_run_tests();
+			}
+			else
+#endif
+			{
+				/* Run all tests using the CUnit Basic interface */
+				CU_basic_set_mode(CU_BRM_VERBOSE);
+				CU_basic_run_tests();
+			}
 		}
 	}
-
 	/* Redisplay list of failed tests on end */
 	if (CU_get_number_of_failure_records()){
 		CU_basic_show_failures(CU_get_failure_list());
@@ -209,6 +290,8 @@ void helper(const char *name) {
 #if HAVE_CU_CURSES
 		"\t\t\t--curses\n"
 #endif
+		"\t\t\t--xml\n"
+		"\t\t\t--xml-file <xml file prefix (will be suffixed by '-Results.xml')>\n"
 		, name);
 }
 
@@ -219,8 +302,8 @@ void helper(const char *name) {
 	}
 
 #ifndef WINAPI_FAMILY_PHONE_APP
-#if TARGET_OS_MAC && !TARGET_OS_IPHONE
-int _main (int argc, char *argv[]) {
+#if TARGET_OS_MAC || TARGET_OS_IPHONE
+int apple_main (int argc, char *argv[]) {
 #else
 int main (int argc, char *argv[]) {
 #endif
@@ -244,6 +327,12 @@ int main (int argc, char *argv[]) {
 			verbose = TRUE;
 		} else if (strcmp(argv[i], "--silent") == 0) {
 			verbose = FALSE;
+		} else if (strcmp(argv[i], "--xml-file") == 0){
+			CHECK_ARG("--xml-file", ++i, argc);
+			xml_file = argv[i];
+			xml = 1;
+		} else if (strcmp(argv[i], "--xml") == 0){
+			xml = 1;
 		}
 #if HAVE_CU_GET_SUITE
 		else if (strcmp(argv[i], "--test")==0) {
@@ -288,9 +377,29 @@ int main (int argc, char *argv[]) {
 		putenv("MEDIASTREAMER_DEBUG=0");
 	}
 
+#ifdef HAVE_CU_CURSES
+	if( xml && curses ){
+		printf("Cannot use both xml and curses\n");
+		return -1;
+	}
+#endif
+
+	if( xml && (suite_name || test_name) ){
+		printf("Cannot use both xml and specific test suite\n");
+		return -1;
+	}
+
 	ret = mediastreamer2_tester_run_tests(suite_name, test_name);
 	CU_cleanup_registry();
 	mediastreamer2_tester_uninit();
+
+	if ( xml ) {
+		/*create real xml file only if tester did not crash*/
+		ms_strcat_printf(xml_tmp_file, "-Results.xml");
+		rename(xml_tmp_file, xml_file);
+		ms_free(xml_tmp_file);
+	}
+
 	return ret;
 }
 #endif

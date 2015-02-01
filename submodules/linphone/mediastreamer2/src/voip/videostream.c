@@ -17,6 +17,8 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+#include <math.h>
+
 #include "mediastreamer2/mediastream.h"
 #include "mediastreamer2/msfilter.h"
 #include "mediastreamer2/msinterfaces.h"
@@ -25,9 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mediastreamer2/msvideoout.h"
 #include "mediastreamer2/msextdisplay.h"
 #include "mediastreamer2/msitc.h"
+#include "mediastreamer2/zrtp.h"
 #include "private.h"
 
-#include <ortp/zrtp.h>
 
 static void configure_itc(VideoStream *stream);
 
@@ -109,49 +111,44 @@ static void video_stream_process_rtcp(MediaStream *media_stream, mblk_t *m){
 	int i;
 
 	if (rtcp_is_PSFB(m)) {
-		if (rtcp_PSFB_get_type(m) == RTCP_PSFB_FIR) {
-			/* Special case for FIR where the packet sender ssrc must be equal to 0. */
-			if (rtcp_PSFB_get_media_source_ssrc(m) == rtp_session_get_send_ssrc(stream->ms.sessions.rtp_session)) {
-				for (i = 0; ; i++) {
-					rtcp_fb_fir_fci_t *fci = rtcp_PSFB_fir_get_fci(m, i);
-					if (fci == NULL) break;
-					if (rtcp_fb_fir_fci_get_ssrc(fci) == rtp_session_get_send_ssrc(stream->ms.sessions.rtp_session)) {
-						uint8_t seq_nr = rtcp_fb_fir_fci_get_seq_nr(fci);
-						ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_FIR, &seq_nr);
-						break;
-					}
-				}
-			}
-		} else {
-			if ((rtcp_PSFB_get_media_source_ssrc(m) == rtp_session_get_send_ssrc(stream->ms.sessions.rtp_session))
-				&& (rtcp_PSFB_get_packet_sender_ssrc(m) == rtp_session_get_recv_ssrc(stream->ms.sessions.rtp_session))) {
-				switch (rtcp_PSFB_get_type(m)) {
-					case RTCP_PSFB_PLI:
-						ms_filter_call_method_noarg(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_PLI);
-						break;
-					case RTCP_PSFB_SLI:
-						for (i = 0; ; i++) {
-							rtcp_fb_sli_fci_t *fci = rtcp_PSFB_sli_get_fci(m, i);
-							MSVideoCodecSLI sli;
-							if (fci == NULL) break;
-							sli.first = rtcp_fb_sli_fci_get_first(fci);
-							sli.number = rtcp_fb_sli_fci_get_number(fci);
-							sli.picture_id = rtcp_fb_sli_fci_get_picture_id(fci);
-							ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_SLI, &sli);
+		if (rtcp_PSFB_get_media_source_ssrc(m) == rtp_session_get_send_ssrc(stream->ms.sessions.rtp_session)) {
+			switch (rtcp_PSFB_get_type(m)) {
+				case  RTCP_PSFB_FIR:
+					for (i = 0; ; i++) {
+						rtcp_fb_fir_fci_t *fci = rtcp_PSFB_fir_get_fci(m, i);
+						if (fci == NULL) break;
+						if (rtcp_fb_fir_fci_get_ssrc(fci) == rtp_session_get_send_ssrc(stream->ms.sessions.rtp_session)) {
+							uint8_t seq_nr = rtcp_fb_fir_fci_get_seq_nr(fci);
+							ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_FIR, &seq_nr);
+							break;
 						}
-						break;
-					case RTCP_PSFB_RPSI:
-					{
-						rtcp_fb_rpsi_fci_t *fci = rtcp_PSFB_rpsi_get_fci(m);
-						MSVideoCodecRPSI rpsi;
-						rpsi.bit_string = rtcp_fb_rpsi_fci_get_bit_string(fci);
-						rpsi.bit_string_len = rtcp_PSFB_rpsi_get_fci_bit_string_len(m);
-						ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_RPSI, &rpsi);
 					}
-						break;
-					default:
-						break;
+					break;
+				case RTCP_PSFB_PLI:
+					ms_filter_call_method_noarg(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_PLI);
+					break;
+				case RTCP_PSFB_SLI:
+					for (i = 0; ; i++) {
+						rtcp_fb_sli_fci_t *fci = rtcp_PSFB_sli_get_fci(m, i);
+						MSVideoCodecSLI sli;
+						if (fci == NULL) break;
+						sli.first = rtcp_fb_sli_fci_get_first(fci);
+						sli.number = rtcp_fb_sli_fci_get_number(fci);
+						sli.picture_id = rtcp_fb_sli_fci_get_picture_id(fci);
+						ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_SLI, &sli);
+					}
+					break;
+				case RTCP_PSFB_RPSI:
+				{
+					rtcp_fb_rpsi_fci_t *fci = rtcp_PSFB_rpsi_get_fci(m);
+					MSVideoCodecRPSI rpsi;
+					rpsi.bit_string = rtcp_fb_rpsi_fci_get_bit_string(fci);
+					rpsi.bit_string_len = rtcp_PSFB_rpsi_get_fci_bit_string_len(m);
+					ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_NOTIFY_RPSI, &rpsi);
 				}
+					break;
+				default:
+					break;
 			}
 		}
 	}
@@ -165,8 +162,40 @@ static void stop_preload_graph(VideoStream *stream){
 	stream->ms.voidsink=stream->ms.rtprecv=NULL;
 }
 
+static void video_stream_track_fps_changes(VideoStream *stream){
+	uint64_t curtime=ortp_get_cur_time_ms();
+	if (stream->last_fps_check==(uint64_t)-1){
+		stream->last_fps_check=curtime;
+		return;
+	}
+	if (curtime-stream->last_fps_check>=2000 && stream->configured_fps>0 && stream->ms.sessions.ticker){
+		MSTickerLateEvent late_ev={0};
+		/*we must check that no late tick occured during the last 2 seconds, otherwise the fps measurement is severely biased.*/
+		ms_ticker_get_last_late_tick(stream->ms.sessions.ticker,&late_ev);
+		
+		if (curtime > late_ev.time + 2000){
+			if (stream->source && stream->ms.encoder &&
+				ms_filter_has_method(stream->source,MS_FILTER_GET_FPS) &&
+				ms_filter_has_method(stream->ms.encoder,MS_FILTER_SET_FPS)){
+				float fps=0;
+				
+				if (ms_filter_call_method(stream->source,MS_FILTER_GET_FPS,&fps)==0 && fps!=0){
+					if (fabsf(fps-stream->configured_fps)/stream->configured_fps>0.2){
+						ms_warning("Measured and target fps significantly different (%f<->%f), updating encoder.",
+							fps,stream->configured_fps);
+						stream->configured_fps=fps;
+						ms_filter_call_method(stream->ms.encoder,MS_FILTER_SET_FPS,&stream->configured_fps);
+					}
+				}
+			}
+			stream->last_fps_check=curtime;
+		}
+	}
+}
+
 void video_stream_iterate(VideoStream *stream){
 	media_stream_iterate(&stream->ms);
+	video_stream_track_fps_changes(stream);
 }
 
 const char *video_stream_get_default_video_renderer(void){
@@ -203,9 +232,13 @@ static float video_stream_get_rtcp_xr_average_lq_quality_rating(unsigned long us
 
 
 VideoStream *video_stream_new(int loc_rtp_port, int loc_rtcp_port, bool_t use_ipv6){
+	return video_stream_new2( use_ipv6 ? "::" : "0.0.0.0", loc_rtp_port, loc_rtcp_port);
+}
+
+VideoStream *video_stream_new2(const char* ip, int loc_rtp_port, int loc_rtcp_port) {
 	MSMediaStreamSessions sessions={0};
 	VideoStream *obj;
-	sessions.rtp_session=create_duplex_rtpsession(loc_rtp_port,loc_rtcp_port,use_ipv6);
+	sessions.rtp_session=create_duplex_rtpsession(ip,loc_rtp_port,loc_rtcp_port);
 	obj=video_stream_new_with_sessions(&sessions);
 	obj->ms.owns_sessions=TRUE;
 	return obj;
@@ -224,6 +257,12 @@ VideoStream *video_stream_new_with_sessions(const MSMediaStreamSessions *session
 
 	stream->ms.type = MSVideo;
 	stream->ms.sessions=*sessions;
+	if (sessions->zrtp_context != NULL) {
+		ms_zrtp_set_stream_sessions(sessions->zrtp_context, &(stream->ms.sessions));
+	}
+	if (sessions->dtls_context != NULL) {
+		ms_dtls_srtp_set_stream_sessions(sessions->dtls_context, &(stream->ms.sessions));
+	}
 	rtp_session_resync(stream->ms.sessions.rtp_session);
 	stream->ms.qi=ms_quality_indicator_new(stream->ms.sessions.rtp_session);
 	ms_quality_indicator_set_label(stream->ms.qi,"video");
@@ -360,6 +399,7 @@ static MSVideoSize get_compatible_size(MSVideoSize maxsize, MSVideoSize wished_s
 	return wished_size;
 }
 
+#if !TARGET_IPHONE_SIMULATOR && !defined(__arm__)
 static MSVideoSize get_with_same_orientation_and_ratio(MSVideoSize size, MSVideoSize refsize){
 	if (ms_video_size_get_orientation(refsize)!=ms_video_size_get_orientation(size)){
 		int tmp;
@@ -370,6 +410,7 @@ static MSVideoSize get_with_same_orientation_and_ratio(MSVideoSize size, MSVideo
 	size.height=(size.width*refsize.height)/refsize.width;
 	return size;
 }
+#endif
 
 static void configure_video_source(VideoStream *stream){
 	MSVideoSize vsize,cam_vsize;
@@ -456,6 +497,7 @@ static void configure_video_source(VideoStream *stream){
 		/* get the output format for webcam reader */
 		ms_filter_call_method(stream->source,MS_FILTER_GET_PIX_FMT,&format);
 	}
+	stream->configured_fps=fps;
 
 	encoder_supports_source_format.supported = FALSE;
 	encoder_supports_source_format.pixfmt = format;
@@ -609,7 +651,7 @@ int video_stream_start_with_source (VideoStream *stream, RtpProfile *profile, co
 	rtp_session_set_jitter_compensation(rtps,jitt_comp);
 
 	rtp_session_signal_connect(stream->ms.sessions.rtp_session,"payload_type_changed",
-			(RtpCallback)video_stream_payload_type_changed,(unsigned long)&stream->ms);
+			(RtpCallback)video_stream_payload_type_changed,&stream->ms);
 
 	rtp_session_get_jitter_buffer_params(stream->ms.sessions.rtp_session,&jbp);
 	jbp.max_packets=1000;//needed for high resolution video
@@ -803,6 +845,7 @@ int video_stream_start_with_source (VideoStream *stream, RtpProfile *profile, co
 	if (stream->ms.sessions.ticker==NULL) media_stream_start_ticker(&stream->ms);
 
 	stream->ms.start_time=ms_time(NULL);
+	stream->last_fps_check=(uint64_t)-1;
 	stream->ms.is_beginning=TRUE;
 
 	/* attach the graphs */
@@ -1112,6 +1155,13 @@ VideoPreview * video_preview_new(void){
 	return stream;
 }
 
+MSVideoSize video_preview_get_current_size(VideoPreview *stream){
+	MSVideoSize ret={0};
+	if (stream->source){
+		ms_filter_call_method(stream->source,MS_FILTER_GET_VIDEO_SIZE,&ret);
+	}
+	return ret;
+}
 
 void video_preview_start(VideoPreview *stream, MSWebCam *device){
 	MSPixFmt format;
@@ -1214,11 +1264,18 @@ void video_stream_send_only_stop(VideoStream *vs){
 }
 
 /* enable ZRTP on the video stream using information from the audio stream */
-void video_stream_enable_zrtp(VideoStream *vstream, AudioStream *astream, OrtpZrtpParams *param){
+void video_stream_enable_zrtp(VideoStream *vstream, AudioStream *astream, MSZrtpParams *param){
 	if (astream->ms.sessions.zrtp_context != NULL && vstream->ms.sessions.zrtp_context == NULL) {
-		vstream->ms.sessions.zrtp_context=ortp_zrtp_multistream_new(astream->ms.sessions.zrtp_context, vstream->ms.sessions.rtp_session, param);
+		vstream->ms.sessions.zrtp_context=ms_zrtp_multistream_new(&(vstream->ms.sessions), astream->ms.sessions.zrtp_context, param);
 	} else if (vstream->ms.sessions.zrtp_context && !vstream->ms.sessions.is_secured)
-		ortp_zrtp_reset_transmition_timer(vstream->ms.sessions.zrtp_context,vstream->ms.sessions.rtp_session);
+		ms_zrtp_reset_transmition_timer(vstream->ms.sessions.zrtp_context);
+}
+
+void video_stream_enable_dtls(VideoStream *stream, MSDtlsSrtpParams *params){
+	if (stream->ms.sessions.dtls_context==NULL) {
+		ms_message("Start DTLS video stream context in stream session [%p]", &(stream->ms.sessions));
+		stream->ms.sessions.dtls_context=ms_dtls_srtp_context_new(&(stream->ms.sessions), params);
+	}
 }
 
 void video_stream_enable_display_filter_auto_rotate(VideoStream* stream, bool_t enable) {

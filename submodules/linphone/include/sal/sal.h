@@ -65,7 +65,7 @@ typedef enum {
 	SalTransportUDP, /*UDP*/
 	SalTransportTCP, /*TCP*/
 	SalTransportTLS, /*TLS*/
-	SalTransportDTLS /*DTLS*/
+	SalTransportDTLS, /*DTLS*/
 }SalTransport;
 
 #define SAL_MEDIA_DESCRIPTION_UNCHANGED			0x00
@@ -109,7 +109,11 @@ void sal_address_set_transport(SalAddress* addr,SalTransport transport);
 void sal_address_set_transport_name(SalAddress* addr,const char* transport);
 void sal_address_set_params(SalAddress *addr, const char *params);
 void sal_address_set_uri_params(SalAddress *addr, const char *params);
-bool_t sal_address_is_ipv6(SalAddress *addr);
+bool_t sal_address_is_ipv6(const SalAddress *addr);
+bool_t sal_address_is_sip(const SalAddress *addr);
+void sal_address_set_password(SalAddress *addr, const char *passwd);
+const char *sal_address_get_password(const SalAddress *addr);
+void sal_address_set_header(SalAddress *addr, const char *header_name, const char *header_value);
 
 Sal * sal_init();
 void sal_uninit(Sal* sal);
@@ -129,6 +133,8 @@ typedef enum{
 	SalProtoRtpSavp,
 	SalProtoRtpAvpf,
 	SalProtoRtpSavpf,
+	SalProtoUdpTlsRtpSavp,
+	SalProtoUdpTlsRtpSavpf,
 	SalProtoOther
 }SalMediaProto;
 const char* sal_media_proto_to_string(SalMediaProto type);
@@ -159,7 +165,7 @@ typedef struct SalIceCandidate {
 	int rport;
 } SalIceCandidate;
 
-#define SAL_MEDIA_DESCRIPTION_MAX_ICE_CANDIDATES 10
+#define SAL_MEDIA_DESCRIPTION_MAX_ICE_CANDIDATES 20
 
 typedef struct SalIceRemoteCandidate {
 	char addr[SAL_MEDIA_DESCRIPTION_MAX_ICE_ADDR_LEN];
@@ -182,6 +188,13 @@ typedef struct SalSrtpCryptoAlgo {
 
 #define SAL_CRYPTO_ALGO_MAX 4
 
+typedef enum {
+	SalDtlsRoleInvalid,
+	SalDtlsRoleIsServer,
+	SalDtlsRoleIsClient,
+	SalDtlsRoleUnset
+} SalDtlsRole;
+
 typedef struct SalStreamDescription{
 	char name[16]; /*unique name of stream, in order to ease offer/answer model algorithm*/
 	SalMediaProto proto;
@@ -190,9 +203,12 @@ typedef struct SalStreamDescription{
 	char proto_other[32];
 	char rtp_addr[64];
 	char rtcp_addr[64];
+	unsigned int rtp_ssrc;
+	char rtcp_cname[255];
 	int rtp_port;
 	int rtcp_port;
-	MSList *payloads; //<list of PayloadType
+	MSList *payloads; /*<list of PayloadType */
+	MSList *already_assigned_payloads; /*<list of PayloadType offered in the past, used for correct allocation of payload type numbers*/
 	int bandwidth;
 	int ptime;
 	SalStreamDir dir;
@@ -207,6 +223,8 @@ typedef struct SalStreamDescription{
 	bool_t ice_mismatch;
 	bool_t ice_completed;
 	bool_t pad[2];
+	char dtls_fingerprint[256];
+	SalDtlsRole dtls_role;
 } SalStreamDescription;
 
 const char *sal_stream_description_get_type_as_string(const SalStreamDescription *desc);
@@ -231,6 +249,8 @@ typedef struct SalMediaDescription{
 	bool_t ice_lite;
 	bool_t ice_completed;
 	bool_t pad[2];
+	char dtls_fingerprint[256];
+	SalDtlsRole dtls_role;
 } SalMediaDescription;
 
 typedef struct SalMessage{
@@ -265,8 +285,10 @@ void sal_media_description_set_dir(SalMediaDescription *md, SalStreamDir stream_
 bool_t sal_stream_description_active(const SalStreamDescription *sd);
 bool_t sal_stream_description_has_avpf(const SalStreamDescription *sd);
 bool_t sal_stream_description_has_srtp(const SalStreamDescription *sd);
+bool_t sal_stream_description_has_dtls(const SalStreamDescription *sd);
 bool_t sal_media_description_has_avpf(const SalMediaDescription *md);
 bool_t sal_media_description_has_srtp(const SalMediaDescription *md);
+bool_t sal_media_description_has_dtls(const SalMediaDescription *md);
 int sal_media_description_get_nb_active_streams(const SalMediaDescription *md);
 
 
@@ -510,13 +532,25 @@ void sal_certificates_chain_parse_file(SalAuthInfo* auth_info, const char* path,
  */
 void sal_signing_key_parse_file(SalAuthInfo* auth_info, const char* path, const char *passwd);
 
+/**
+ * Parse a directory for files containing certificate with the given subject CNAME
+ * @param[out]	certificate_pem				the address of a string to store the certificate in PEM format. To be freed by caller
+ * @param[out]	key_pem						the address of a string to store the key in PEM format. To be freed by caller
+ * @param[in]	path						directory to parse
+ * @param[in]	subject						subject CNAME
+ * @param[in]	format 						either PEM or DER
+ * @param[in]	generate_certificate		if true, if matching certificate and key can't be found, generate it and store it into the given dir, filename will be subject.pem
+ * @param[in]	generate_dtls_fingerprint	if true and we have a certificate, generate the dtls fingerprint as described in rfc4572
+ */
+void sal_certificates_chain_parse_directory(char **certificate_pem, char **key_pem, char **fingerprint, const char* path, const char *subject, SalCertificateRawFormat format, bool_t generate_certificate, bool_t generate_dtls_fingerprint); 
+
 void sal_certificates_chain_delete(SalCertificatesChain *chain);
 void sal_signing_key_delete(SalSigningKey *key);
 
 
 
 void sal_set_callbacks(Sal *ctx, const SalCallbacks *cbs);
-int sal_listen_port(Sal *ctx, const char *addr, int port, SalTransport tr, int is_secure);
+int sal_listen_port(Sal *ctx, const char *addr, int port, SalTransport tr, int is_tunneled);
 int sal_get_listening_port(Sal *ctx, SalTransport tr);
 int sal_unlisten_ports(Sal *ctx);
 int sal_transport_available(Sal *ctx, SalTransport t);
@@ -533,8 +567,7 @@ void sal_append_stack_string_to_user_agent(Sal *ctx);
 /*keepalive period in ms*/
 void sal_set_keepalive_period(Sal *ctx,unsigned int value);
 void sal_use_tcp_tls_keepalive(Sal *ctx, bool_t enabled);
-int sal_enable_tunnel(Sal *ctx, void *tunnelclient);
-void sal_disable_tunnel(Sal *ctx);
+int sal_set_tunnel(Sal *ctx, void *tunnelclient);
 /*Default value is true*/
 void sal_enable_sip_update_method(Sal *ctx,bool_t value);
 
@@ -639,6 +672,12 @@ bool_t sal_call_autoanswer_asked(SalOp *op);
 void sal_call_send_vfu_request(SalOp *h);
 int sal_call_is_offerer(const SalOp *h);
 int sal_call_notify_refer_state(SalOp *h, SalOp *newcall);
+/* Call test API */
+/*willingly fails to parse SDP from received packets (INVITE and/or ACK) if value=true */
+/* First version: for all new SalOp created (eg. each incoming or outgoing call). Do not forget to reset previous value when you are done!*/
+void sal_default_enable_sdp_removal(Sal* h, bool_t enable) ;
+/* Second version: for a specific call*/
+void sal_call_enable_sdp_removal(SalOp *h, bool_t enable) ;
 
 /*Registration*/
 int sal_register(SalOp *op, const char *proxy, const char *from, int expires);
@@ -750,6 +789,7 @@ LINPHONE_PUBLIC bool_t sal_dns_srv_enabled(const Sal *sal);
 LINPHONE_PUBLIC void sal_set_dns_user_hosts_file(Sal *sal, const char *hosts_file);
 LINPHONE_PUBLIC const char *sal_get_dns_user_hosts_file(const Sal *sal);
 unsigned int sal_get_random(void);
+char *sal_get_random_token(int size);
 unsigned char * sal_get_random_bytes(unsigned char *ret, size_t size);
 belle_sip_source_t * sal_create_timer(Sal *sal, belle_sip_source_func_t func, void *data, unsigned int timeout_value_ms, const char* timer_name);
 void sal_cancel_timer(Sal *sal, belle_sip_source_t *timer);

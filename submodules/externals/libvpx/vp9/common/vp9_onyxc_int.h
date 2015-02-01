@@ -56,9 +56,16 @@ typedef enum {
   REFERENCE_MODES       = 3,
 } REFERENCE_MODE;
 
+typedef struct {
+  int_mv mv[2];
+  MV_REFERENCE_FRAME ref_frame[2];
+} MV_REF;
 
 typedef struct {
   int ref_count;
+  MV_REF *mvs;
+  int mi_rows;
+  int mi_cols;
   vpx_codec_frame_buffer_t raw_frame_buffer;
   YV12_BUFFER_CONFIG buf;
 } RefCntBuffer;
@@ -68,9 +75,6 @@ typedef struct VP9Common {
 
   DECLARE_ALIGNED(16, int16_t, y_dequant[QINDEX_RANGE][8]);
   DECLARE_ALIGNED(16, int16_t, uv_dequant[QINDEX_RANGE][8]);
-#if CONFIG_ALPHA
-  DECLARE_ALIGNED(16, int16_t, a_dequant[QINDEX_RANGE][8]);
-#endif
 
   COLOR_SPACE color_space;
 
@@ -87,9 +91,16 @@ typedef struct VP9Common {
   int subsampling_x;
   int subsampling_y;
 
-  YV12_BUFFER_CONFIG *frame_to_show;
+#if CONFIG_VP9_HIGHBITDEPTH
+  int use_highbitdepth;  // Marks if we need to use 16bit frame buffers.
+#endif
 
+  YV12_BUFFER_CONFIG *frame_to_show;
   RefCntBuffer frame_bufs[FRAME_BUFFERS];
+  RefCntBuffer *prev_frame;
+
+  // TODO(hkuang): Combine this with cur_buf in macroblockd.
+  RefCntBuffer *cur_frame;
 
   int ref_frame_map[REF_FRAMES]; /* maps fb_idx to reference slot */
 
@@ -134,23 +145,26 @@ typedef struct VP9Common {
   int y_dc_delta_q;
   int uv_dc_delta_q;
   int uv_ac_delta_q;
-#if CONFIG_ALPHA
-  int a_dc_delta_q;
-  int a_ac_delta_q;
-#endif
 
   /* We allocate a MODE_INFO struct for each macroblock, together with
      an extra row on top and column on the left to simplify prediction. */
-
+  int mi_alloc_size;
   MODE_INFO *mip; /* Base of allocated array */
   MODE_INFO *mi;  /* Corresponds to upper left visible macroblock */
+
+  // TODO(agrange): Move prev_mi into encoder structure.
+  // prev_mip and prev_mi will only be allocated in VP9 encoder.
   MODE_INFO *prev_mip; /* MODE_INFO array 'mip' from last decoded frame */
   MODE_INFO *prev_mi;  /* 'mi' from last frame (points into prev_mip) */
 
-  MODE_INFO **mi_grid_base;
-  MODE_INFO **mi_grid_visible;
-  MODE_INFO **prev_mi_grid_base;
-  MODE_INFO **prev_mi_grid_visible;
+  // Separate mi functions between encoder and decoder.
+  int (*alloc_mi)(struct VP9Common *cm, int mi_size);
+  void (*free_mi)(struct VP9Common *cm);
+  void (*setup_mi)(struct VP9Common *cm);
+
+
+  // Whether to use previous frame's motion vectors for prediction.
+  int use_prev_frame_mvs;
 
   // Persistent mb segment id map used in prediction.
   unsigned char *last_frame_seg_map;
@@ -172,16 +186,17 @@ typedef struct VP9Common {
   MV_REFERENCE_FRAME comp_var_ref[2];
   REFERENCE_MODE reference_mode;
 
-  FRAME_CONTEXT fc;  /* this frame entropy */
-  FRAME_CONTEXT frame_contexts[FRAME_CONTEXTS];
+  FRAME_CONTEXT *fc;  /* this frame entropy */
+  FRAME_CONTEXT *frame_contexts;   // FRAME_CONTEXTS
   unsigned int  frame_context_idx; /* Context to use/update */
   FRAME_COUNTS counts;
 
   unsigned int current_video_frame;
   BITSTREAM_PROFILE profile;
 
-  // BITS_8 in versions 0 and 1, BITS_10 or BITS_12 in version 2
-  BIT_DEPTH bit_depth;
+  // VPX_BITS_8 in profile 0 or 1, VPX_BITS_10 or VPX_BITS_12 in profile 2 or 3.
+  vpx_bit_depth_t bit_depth;
+  vpx_bit_depth_t dequant_bit_depth;  // bit_depth of current dequantizer
 
 #if CONFIG_VP9_POSTPROC
   struct postproc_state  postproc_state;
@@ -189,11 +204,6 @@ typedef struct VP9Common {
 
   int error_resilient_mode;
   int frame_parallel_decoding_mode;
-
-  // Flag indicates if prev_mi can be used in coding:
-  //   0: encoder assumes decoder does not have prev_mi
-  //   1: encoder assumes decoder has and uses prev_mi
-  unsigned int coding_use_prev_mi;
 
   int log2_tile_cols, log2_tile_rows;
 
@@ -208,6 +218,15 @@ typedef struct VP9Common {
   PARTITION_CONTEXT *above_seg_context;
   ENTROPY_CONTEXT *above_context;
 } VP9_COMMON;
+
+static INLINE YV12_BUFFER_CONFIG *get_ref_frame(VP9_COMMON *cm, int index) {
+  if (index < 0 || index >= REF_FRAMES)
+    return NULL;
+  if (cm->ref_frame_map[index] < 0)
+    return NULL;
+  assert(cm->ref_frame_map[index] < FRAME_BUFFERS);
+  return &cm->frame_bufs[cm->ref_frame_map[index]].buf;
+}
 
 static INLINE YV12_BUFFER_CONFIG *get_frame_new_buffer(VP9_COMMON *cm) {
   return &cm->frame_bufs[cm->new_fb_idx].buf;
@@ -252,10 +271,14 @@ static INLINE void init_macroblockd(VP9_COMMON *cm, MACROBLOCKD *xd) {
   xd->mi_stride = cm->mi_stride;
 }
 
+static INLINE int frame_is_intra_only(const VP9_COMMON *const cm) {
+  return cm->frame_type == KEY_FRAME || cm->intra_only;
+}
+
 static INLINE const vp9_prob* get_partition_probs(const VP9_COMMON *cm,
                                                   int ctx) {
-  return cm->frame_type == KEY_FRAME ? vp9_kf_partition_probs[ctx]
-                                     : cm->fc.partition_prob[ctx];
+  return frame_is_intra_only(cm) ? vp9_kf_partition_probs[ctx]
+                                 : cm->fc->partition_prob[ctx];
 }
 
 static INLINE void set_skip_context(MACROBLOCKD *xd, int mi_row, int mi_col) {
@@ -267,6 +290,11 @@ static INLINE void set_skip_context(MACROBLOCKD *xd, int mi_row, int mi_col) {
     pd->above_context = &xd->above_context[i][above_idx >> pd->subsampling_x];
     pd->left_context = &xd->left_context[i][left_idx >> pd->subsampling_y];
   }
+}
+
+static INLINE int calc_mi_size(int len) {
+  // len is in mi units.
+  return len + MI_BLOCK_SIZE;
 }
 
 static INLINE void set_mi_row_col(MACROBLOCKD *xd, const TileInfo *const tile,
@@ -294,10 +322,6 @@ static INLINE void set_prev_mi(VP9_COMMON *cm) {
                   cm->prev_mip + cm->mi_stride + 1 : NULL;
 }
 
-static INLINE int frame_is_intra_only(const VP9_COMMON *const cm) {
-  return cm->frame_type == KEY_FRAME || cm->intra_only;
-}
-
 static INLINE void update_partition_context(MACROBLOCKD *xd,
                                             int mi_row, int mi_col,
                                             BLOCK_SIZE subsize,
@@ -321,11 +345,11 @@ static INLINE int partition_plane_context(const MACROBLOCKD *xd,
   const PARTITION_CONTEXT *above_ctx = xd->above_seg_context + mi_col;
   const PARTITION_CONTEXT *left_ctx = xd->left_seg_context + (mi_row & MI_MASK);
 
-  const int bsl = mi_width_log2(bsize);
+  const int bsl = mi_width_log2_lookup[bsize];
   const int bs = 1 << bsl;
   int above = 0, left = 0, i;
 
-  assert(b_width_log2(bsize) == b_height_log2(bsize));
+  assert(b_width_log2_lookup[bsize] == b_height_log2_lookup[bsize]);
   assert(bsl >= 0);
 
   for (i = 0; i < bs; i++) {

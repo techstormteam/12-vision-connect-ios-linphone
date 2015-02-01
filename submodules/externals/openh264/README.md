@@ -5,7 +5,7 @@ OpenH264 is a codec library which supports H.264 encoding and decoding. It is su
 Encoder Features
 ----------------
 - Constrained Baseline Profile up to Level 5.2 (4096x2304)
-- Arbitrary resolution, support cropping
+- Arbitrary resolution, not constrained to multiples of 16x16
 - Rate control with adaptive quantization, or constant quantization
 - Slice options: 1 slice per frame, N slices per frame, N macroblocks per slice, or N bytes per slice
 - Multiple threads automatically used for multiple slices
@@ -32,8 +32,6 @@ Decoder Features
 - Multiple reference frames when specified in Sequence Parameter Set (SPS)
 - Annex B byte stream input
 - YUV 4:2:0 planar output
-- Decoder output timing conformance
-- Error concealment support with slice copy as default method
 
 OS Support
 ----------
@@ -41,7 +39,7 @@ OS Support
 - Mac OS X 64-bit and 32-bit
 - Linux 64-bit and 32-bit
 - Android 32-bit
-- iOS 64-bit and 32-bit (not fully tested)
+- iOS 64-bit and 32-bit
 
 Processor Support
 -----------------
@@ -66,14 +64,13 @@ The codec and demo can be built by
 'make OS=android NDKROOT=**ANDROID_NDK** TARGET= **ANDROID_TARGET**'
 
 Valid **ANDROID_TARGET** can be found in **ANDROID_SDK**/platforms, such as android-12.
-You can also set ARCH, NDKLEVEL, GCCVERSION according to your device and NDK version.
+You can also set ARCH, NDKLEVEL according to your device and NDK version.
 ARCH specifies the architecture of android device. Currently only arm and x86 are supported, the default is arm.
 NDKLEVEL specifies android api level, the api level can be 12-19, the default is 12.
-GCCVERSION specifies which gcc in NDK is used, the default is 4.8.
 
 By default these commands build for the armeabi-v7a ABI. To build for the other android
-ABIs, add "ARCH=mips" or "ARCH=x86". To build for the older armeabi ABI (which has
-armv5te as baseline), add "APP_ABI=armeabi" (ARCH=arm is implicit).
+ABIs, add "ARCH=arm64", "ARCH=x86", "ARCH=x86_64", "ARCH=mips" or "ARCH=mips64".
+To build for the older armeabi ABI (which has armv5te as baseline), add "APP_ABI=armeabi" (ARCH=arm is implicit).
 
 For iOS Builds
 --------------
@@ -138,9 +135,6 @@ Known Issues
 See the issue tracker on https://github.com/cisco/openh264/issues
 - Encoder errors when resolution exceeds 3840x2160
 - Encoder errors when compressed frame size exceeds half uncompressed size
-- Encoder does not support QP < 10 encoding
-- Encoder does not support slice number > 35 encoding
-- The result of float-point calculation in rate control will be affected by preciseness of double-typed variable on different platform
 - Decoder errors when compressed frame size exceeds 1MB
 - Encoder RC requires frame skipping to be enabled to hit the target bitrate,
   if frame skipping is disabled the target bitrate may be exceeded

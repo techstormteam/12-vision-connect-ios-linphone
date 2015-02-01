@@ -31,10 +31,10 @@ void rtp_signal_table_init(RtpSignalTable *table,RtpSession *session, const char
 	session->signal_tables=o_list_append(session->signal_tables,(void*)table);
 }
 
-int rtp_signal_table_add(RtpSignalTable *table,RtpCallback cb, unsigned long user_data)
+int rtp_signal_table_add(RtpSignalTable *table,RtpCallback cb, void *user_data)
 {
 	int i;
-	
+
 	for (i=0;i<RTP_CALLBACK_TABLE_MAX_ENTRIES;i++){
 		if (table->callback[i]==NULL){
 			table->callback[i]=cb;
@@ -46,14 +46,15 @@ int rtp_signal_table_add(RtpSignalTable *table,RtpCallback cb, unsigned long use
 	return -1;
 }
 
+
 void rtp_signal_table_emit(RtpSignalTable *table)
 {
 	int i,c;
-	
+
 	for (i=0,c=0;c<table->count;i++){
 		if (table->callback[i]!=NULL){
 			c++;	/*I like it*/
-			table->callback[i](table->session,table->user_data[i]);
+			table->callback[i](table->session,(unsigned long)table->user_data[i],0,0);
 		}
 	}
 }
@@ -61,11 +62,11 @@ void rtp_signal_table_emit(RtpSignalTable *table)
 void rtp_signal_table_emit2(RtpSignalTable *table,unsigned long arg)
 {
 	int i,c;
-	
+
 	for (i=0,c=0;c<table->count;i++){
 		if (table->callback[i]!=NULL){
 			c++;	/*I like it*/
-			table->callback[i](table->session,arg,table->user_data[i]);
+			table->callback[i](table->session,arg,(unsigned long)table->user_data[i],0);
 		}
 	}
 }
@@ -73,11 +74,11 @@ void rtp_signal_table_emit2(RtpSignalTable *table,unsigned long arg)
 void rtp_signal_table_emit3(RtpSignalTable *table, unsigned long arg1, unsigned long arg2)
 {
 	int i,c;
-	
+
 	for (i=0,c=0;c<table->count;i++){
 		if (table->callback[i]!=NULL){
 			c++;	/*I like it*/
-			table->callback[i](table->session,arg1,arg2,table->user_data[i]);
+			table->callback[i](table->session,arg1,arg2,(unsigned long)table->user_data[i]);
 		}
 	}
 }
@@ -85,7 +86,7 @@ void rtp_signal_table_emit3(RtpSignalTable *table, unsigned long arg1, unsigned 
 int rtp_signal_table_remove_by_callback(RtpSignalTable *table,RtpCallback cb)
 {
 	int i;
-	
+
 	for (i=0;i<RTP_CALLBACK_TABLE_MAX_ENTRIES;i++){
 		if (table->callback[i]==cb){
 			table->callback[i]=NULL;

@@ -19,7 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "mediastreamer2/mscommon.h"
-#include "mediastreamer2/dsptools.h"
+#include "mediastreamer2/msutils.h"
 
 static void completion_cb(void *user_data, int percentage){
 	fprintf(stdout,"%i %% completed\r",percentage);

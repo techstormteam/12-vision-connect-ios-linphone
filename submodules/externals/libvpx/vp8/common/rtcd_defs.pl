@@ -149,11 +149,10 @@ $vp8_copy_mem8x4_media=vp8_copy_mem8x4_v6;
 $vp8_copy_mem8x4_dspr2=vp8_copy_mem8x4_dspr2;
 
 add_proto qw/void vp8_build_intra_predictors_mby_s/, "struct macroblockd *x, unsigned char * yabove_row, unsigned char * yleft, int left_stride, unsigned char * ypred_ptr, int y_stride";
-specialize qw/vp8_build_intra_predictors_mby_s sse2 ssse3/;
-#TODO: fix assembly for neon
+specialize qw/vp8_build_intra_predictors_mby_s sse2 ssse3 neon/;
 
 add_proto qw/void vp8_build_intra_predictors_mbuv_s/, "struct macroblockd *x, unsigned char * uabove_row, unsigned char * vabove_row,  unsigned char *uleft, unsigned char *vleft, int left_stride, unsigned char * upred_ptr, unsigned char * vpred_ptr, int pred_stride";
-specialize qw/vp8_build_intra_predictors_mbuv_s sse2 ssse3/;
+specialize qw/vp8_build_intra_predictors_mbuv_s sse2 ssse3 neon/;
 
 add_proto qw/void vp8_intra4x4_predict/, "unsigned char *Above, unsigned char *yleft, int left_stride, int b_mode, unsigned char *dst, int dst_stride, unsigned char top_left";
 specialize qw/vp8_intra4x4_predict media/;
@@ -216,7 +215,8 @@ $vp8_sixtap_predict8x4_media=vp8_sixtap_predict8x4_armv6;
 $vp8_sixtap_predict8x4_dspr2=vp8_sixtap_predict8x4_dspr2;
 
 add_proto qw/void vp8_sixtap_predict4x4/, "unsigned char *src, int src_pitch, int xofst, int yofst, unsigned char *dst, int dst_pitch";
-specialize qw/vp8_sixtap_predict4x4 mmx ssse3 media neon dspr2/;
+# Disable neon while investigating https://code.google.com/p/webm/issues/detail?id=817
+specialize qw/vp8_sixtap_predict4x4 mmx ssse3 media dspr2/;
 $vp8_sixtap_predict4x4_media=vp8_sixtap_predict4x4_armv6;
 $vp8_sixtap_predict4x4_dspr2=vp8_sixtap_predict4x4_dspr2;
 
@@ -269,9 +269,10 @@ specialize qw/vp8_sub_pixel_variance4x4 mmx sse2/;
 $vp8_sub_pixel_variance4x4_sse2=vp8_sub_pixel_variance4x4_wmt;
 
 add_proto qw/unsigned int vp8_sub_pixel_variance8x8/, "const unsigned char  *src_ptr, int  source_stride, int  xoffset, int  yoffset, const unsigned char *ref_ptr, int Refstride, unsigned int *sse";
-specialize qw/vp8_sub_pixel_variance8x8 mmx sse2 media neon/;
+specialize qw/vp8_sub_pixel_variance8x8 mmx sse2 media neon_asm/;
 $vp8_sub_pixel_variance8x8_sse2=vp8_sub_pixel_variance8x8_wmt;
 $vp8_sub_pixel_variance8x8_media=vp8_sub_pixel_variance8x8_armv6;
+$vp8_sub_pixel_variance8x8_neon_asm=vp8_sub_pixel_variance8x8_neon;
 
 add_proto qw/unsigned int vp8_sub_pixel_variance8x16/, "const unsigned char  *src_ptr, int  source_stride, int  xoffset, int  yoffset, const unsigned char *ref_ptr, int Refstride, unsigned int *sse";
 specialize qw/vp8_sub_pixel_variance8x16 mmx sse2/;
@@ -282,9 +283,10 @@ specialize qw/vp8_sub_pixel_variance16x8 mmx sse2 ssse3/;
 $vp8_sub_pixel_variance16x8_sse2=vp8_sub_pixel_variance16x8_wmt;
 
 add_proto qw/unsigned int vp8_sub_pixel_variance16x16/, "const unsigned char  *src_ptr, int  source_stride, int  xoffset, int  yoffset, const unsigned char *ref_ptr, int Refstride, unsigned int *sse";
-specialize qw/vp8_sub_pixel_variance16x16 mmx sse2 ssse3 media neon/;
+specialize qw/vp8_sub_pixel_variance16x16 mmx sse2 ssse3 media neon_asm/;
 $vp8_sub_pixel_variance16x16_sse2=vp8_sub_pixel_variance16x16_wmt;
 $vp8_sub_pixel_variance16x16_media=vp8_sub_pixel_variance16x16_armv6;
+$vp8_sub_pixel_variance16x16_neon_asm=vp8_sub_pixel_variance16x16_neon;
 
 add_proto qw/unsigned int vp8_variance_halfpixvar16x16_h/, "const unsigned char *src_ptr, int source_stride, const unsigned char *ref_ptr, int  ref_stride, unsigned int *sse";
 specialize qw/vp8_variance_halfpixvar16x16_h mmx sse2 media neon/;
@@ -449,28 +451,10 @@ $vp8_short_walsh4x4_media=vp8_short_walsh4x4_armv6;
 # Quantizer
 #
 add_proto qw/void vp8_regular_quantize_b/, "struct block *, struct blockd *";
-specialize qw/vp8_regular_quantize_b sse2/;
-# TODO(johann) Update sse4 implementation and re-enable
-#$vp8_regular_quantize_b_sse4_1=vp8_regular_quantize_b_sse4;
+specialize qw/vp8_regular_quantize_b sse2 sse4_1/;
 
 add_proto qw/void vp8_fast_quantize_b/, "struct block *, struct blockd *";
-specialize qw/vp8_fast_quantize_b sse2 ssse3 media neon/;
-$vp8_fast_quantize_b_media=vp8_fast_quantize_b_armv6;
-
-add_proto qw/void vp8_regular_quantize_b_pair/, "struct block *b1, struct block *b2, struct blockd *d1, struct blockd *d2";
-# no asm yet
-
-add_proto qw/void vp8_fast_quantize_b_pair/, "struct block *b1, struct block *b2, struct blockd *d1, struct blockd *d2";
-specialize qw/vp8_fast_quantize_b_pair neon/;
-
-add_proto qw/void vp8_quantize_mb/, "struct macroblock *";
-specialize qw/vp8_quantize_mb neon/;
-
-add_proto qw/void vp8_quantize_mby/, "struct macroblock *";
-specialize qw/vp8_quantize_mby neon/;
-
-add_proto qw/void vp8_quantize_mbuv/, "struct macroblock *";
-specialize qw/vp8_quantize_mbuv neon/;
+specialize qw/vp8_fast_quantize_b sse2 ssse3 neon/;
 
 #
 # Block subtraction
@@ -488,16 +472,13 @@ specialize qw/vp8_mbuverror mmx sse2/;
 $vp8_mbuverror_sse2=vp8_mbuverror_xmm;
 
 add_proto qw/void vp8_subtract_b/, "struct block *be, struct blockd *bd, int pitch";
-specialize qw/vp8_subtract_b mmx sse2 media neon/;
-$vp8_subtract_b_media=vp8_subtract_b_armv6;
+specialize qw/vp8_subtract_b mmx sse2 neon/;
 
 add_proto qw/void vp8_subtract_mby/, "short *diff, unsigned char *src, int src_stride, unsigned char *pred, int pred_stride";
-specialize qw/vp8_subtract_mby mmx sse2 media neon/;
-$vp8_subtract_mby_media=vp8_subtract_mby_armv6;
+specialize qw/vp8_subtract_mby mmx sse2 neon/;
 
 add_proto qw/void vp8_subtract_mbuv/, "short *diff, unsigned char *usrc, unsigned char *vsrc, int src_stride, unsigned char *upred, unsigned char *vpred, int pred_stride";
-specialize qw/vp8_subtract_mbuv mmx sse2 media neon/;
-$vp8_subtract_mbuv_media=vp8_subtract_mbuv_armv6;
+specialize qw/vp8_subtract_mbuv mmx sse2 neon/;
 
 #
 # Motion search
@@ -523,17 +504,13 @@ if (vpx_config("CONFIG_REALTIME_ONLY") ne "yes") {
 }
 
 #
-# Pick Loopfilter
-#
-add_proto qw/void vp8_yv12_copy_partial_frame/, "struct yv12_buffer_config *src_ybc, struct yv12_buffer_config *dst_ybc";
-specialize qw/vp8_yv12_copy_partial_frame neon/;
-
-#
 # Denoiser filter
 #
 if (vpx_config("CONFIG_TEMPORAL_DENOISING") eq "yes") {
-    add_proto qw/int vp8_denoiser_filter/, "struct yv12_buffer_config* mc_running_avg, struct yv12_buffer_config* running_avg, struct macroblock* signal, unsigned int motion_magnitude2, int y_offset, int uv_offset";
+    add_proto qw/int vp8_denoiser_filter/, "unsigned char *mc_running_avg_y, int mc_avg_y_stride, unsigned char *running_avg_y, int avg_y_stride, unsigned char *sig, int sig_stride, unsigned int motion_magnitude, int increase_denoising";
     specialize qw/vp8_denoiser_filter sse2 neon/;
+    add_proto qw/int vp8_denoiser_filter_uv/, "unsigned char *mc_running_avg, int mc_avg_stride, unsigned char *running_avg, int avg_stride, unsigned char *sig, int sig_stride, unsigned int motion_magnitude, int increase_denoising";
+    specialize qw/vp8_denoiser_filter_uv sse2 neon/;
 }
 
 # End of encoder only functions

@@ -39,7 +39,7 @@
 #include "nal_encap.h"
 #include "svc_enc_golomb.h"
 #include "ls_defines.h"
-namespace WelsSVCEnc {
+namespace WelsEnc {
 /*!
  * \brief	load an initialize NAL pRawNal pData
  */
@@ -177,7 +177,7 @@ int32_t WelsEncodeNal (SWelsNalRaw* pRawNal, void* pNalHeaderExt, const int32_t 
   }
 
   /* count length of NAL Unit */
-  iNalLength	= pDstPointer - pDstStart;
+  iNalLength	= (int32_t) (pDstPointer - pDstStart);
   if (NULL != pDstLen)
     *pDstLen	= iNalLength;
 
@@ -193,9 +193,8 @@ int32_t WelsWriteSVCPrefixNal (SBitStringAux* pBitStringAux, const int32_t kiNal
     BsWriteOneBit (pBitStringAux, false/*bStoreRefBasePicFlag*/);
     BsWriteOneBit (pBitStringAux, false);
     BsRbspTrailingBits (pBitStringAux);
-    BsFlush (pBitStringAux);
   }
   return 0;
 }
 
-} // namespace WelsSVCEnc
+} // namespace WelsEnc

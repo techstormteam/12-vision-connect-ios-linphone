@@ -16,7 +16,6 @@
 #include "vp9/common/vp9_seg_common.h"
 
 #include "vp9/encoder/vp9_ratectrl.h"
-#include "vp9/encoder/vp9_rdopt.h"
 #include "vp9/encoder/vp9_segmentation.h"
 
 struct CYCLIC_REFRESH {
@@ -95,19 +94,17 @@ static int candidate_refresh_aq(const CYCLIC_REFRESH *cr,
                                 const MB_MODE_INFO *mbmi,
                                 BLOCK_SIZE bsize, int use_rd) {
   if (use_rd) {
+    MV mv = mbmi->mv[0].as_mv;
     // If projected rate is below the thresh_rate (well below target,
     // so undershoot expected), accept it for lower-qp coding.
     if (cr->projected_rate_sb < cr->thresh_rate_sb)
       return 1;
     // Otherwise, reject the block for lower-qp coding if any of the following:
-    // 1) prediction block size is below min_block_size
-    // 2) mode is non-zero mv and projected distortion is above thresh_dist
-    // 3) mode is an intra-mode (we may want to allow some of this under
+    // 1) mode uses large mv
+    // 2) mode is an intra-mode (we may want to allow some of this under
     // another thresh_dist)
-    else if (bsize < cr->min_block_size ||
-             (mbmi->mv[0].as_int != 0 &&
-              cr->projected_dist_sb > cr->thresh_dist_sb) ||
-             !is_inter_block(mbmi))
+    else if (mv.row > 32 || mv.row < -32 ||
+             mv.col > 32 || mv.col < -32 || !is_inter_block(mbmi))
       return 0;
     else
       return 1;
@@ -136,8 +133,7 @@ void vp9_cyclic_refresh_update_segment(VP9_COMP *const cpi,
   const int xmis = MIN(cm->mi_cols - mi_col, bw);
   const int ymis = MIN(cm->mi_rows - mi_row, bh);
   const int block_index = mi_row * cm->mi_cols + mi_col;
-  const int refresh_this_block = cpi->mb.in_static_area ||
-                                 candidate_refresh_aq(cr, mbmi, bsize, use_rd);
+  const int refresh_this_block = candidate_refresh_aq(cr, mbmi, bsize, use_rd);
   // Default is to not update the refresh map.
   int new_map_value = cr->map[block_index];
   int x = 0; int y = 0;
@@ -162,6 +158,7 @@ void vp9_cyclic_refresh_update_segment(VP9_COMP *const cpi,
     // Leave it marked as block that is not candidate for refresh.
     new_map_value = 1;
   }
+
   // Update entries in the cyclic refresh map with new_map_value, and
   // copy mbmi->segment_id into global segmentation map.
   for (y = 0; y < ymis; y++)
@@ -201,7 +198,7 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
 
     // Rate target ratio to set q delta.
     const float rate_ratio_qdelta = 2.0;
-    const double q = vp9_convert_qindex_to_q(cm->base_qindex);
+    const double q = vp9_convert_qindex_to_q(cm->base_qindex, cm->bit_depth);
     vp9_clear_system_state();
     // Some of these parameters may be set via codec-control function later.
     cr->max_sbs_perframe = 10;
@@ -215,8 +212,8 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
     if (cpi->sf.use_nonrd_pick_mode) {
       // May want to be more conservative with thresholds in non-rd mode for now
       // as rate/distortion are derived from model based on prediction residual.
-      cr->thresh_rate_sb = (rc->sb64_target_rate * 256) >> 3;
-      cr->thresh_dist_sb = 4 * (int)(q * q);
+      cr->thresh_rate_sb = (rc->sb64_target_rate * 256);
+      cr->thresh_dist_sb = 16 * (int)(q * q);
     }
 
     cr->num_seg_blocks = 0;
@@ -243,7 +240,8 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
     // Set the q delta for segment 1.
     qindex_delta = vp9_compute_qdelta_by_rate(rc, cm->frame_type,
                                               cm->base_qindex,
-                                              rate_ratio_qdelta);
+                                              rate_ratio_qdelta,
+                                              cm->bit_depth);
     // TODO(marpan): Incorporate the actual-vs-target rate over/undershoot from
     // previous encoded frame.
     if (-qindex_delta > cr->max_qdelta_perc * cm->base_qindex / 100)

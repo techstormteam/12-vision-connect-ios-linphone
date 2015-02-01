@@ -39,7 +39,7 @@
  */
 
 
-#ifdef LINUX
+#ifdef __linux__
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -57,6 +57,9 @@
 #endif
 #ifdef ANDROID_NDK
 #include <cpu-features.h>
+#endif
+#ifdef __ANDROID__
+#include <android/api-level.h>
 #endif
 
 #include "WelsThreadLib.h"
@@ -195,6 +198,12 @@ WELS_THREAD_ERROR_CODE    WelsThreadCreate (WELS_THREAD_HANDLE* thread,  LPWELS_
   return WELS_THREAD_ERROR_OK;
 }
 
+WELS_THREAD_ERROR_CODE WelsThreadSetName (const char* thread_name) {
+  // do nothing
+  return WELS_THREAD_ERROR_OK;
+}
+
+
 WELS_THREAD_ERROR_CODE    WelsThreadJoin (WELS_THREAD_HANDLE  thread) {
   WaitForSingleObject (thread, INFINITE);
   CloseHandle (thread);
@@ -240,6 +249,17 @@ WELS_THREAD_ERROR_CODE    WelsThreadCreate (WELS_THREAD_HANDLE* thread,  LPWELS_
   pthread_attr_destroy (&at);
 
   return err;
+}
+
+WELS_THREAD_ERROR_CODE WelsThreadSetName (const char* thread_name) {
+#ifdef APPLE_IOS
+  pthread_setname_np(thread_name);
+#endif
+#if defined(__ANDROID__) && __ANDROID_API__ >= 9
+  pthread_setname_np(pthread_self(), thread_name);
+#endif
+  // do nothing
+  return WELS_THREAD_ERROR_OK;
 }
 
 WELS_THREAD_ERROR_CODE    WelsThreadJoin (WELS_THREAD_HANDLE  thread) {
@@ -450,7 +470,7 @@ WELS_THREAD_ERROR_CODE    WelsQueryLogicalProcessInfo (WelsLogicalProcessInfo* p
 #ifdef ANDROID_NDK
   pInfo->ProcessorCount = android_getCpuCount();
   return WELS_THREAD_ERROR_OK;
-#elif defined(LINUX)
+#elif defined(__linux__)
 
   cpu_set_t cpuset;
 
@@ -472,7 +492,7 @@ WELS_THREAD_ERROR_CODE    WelsQueryLogicalProcessInfo (WelsLogicalProcessInfo* p
 
   return WELS_THREAD_ERROR_OK;
 
-#endif//LINUX
+#endif//__linux__
 }
 
 #endif

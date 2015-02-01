@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "mediastreamer2/msfilter.h"
 #include "mediastreamer2/mscodecutils.h"
-#include "mediastreamer2/msfilter.h"
 #include "mediastreamer2/msticker.h"
 #include "ortp/rtp.h"
 
@@ -113,9 +112,13 @@ static void ms_opus_enc_preprocess(MSFilter *f) {
 		return;
 	}
 
-	/* set complexity to 0 for arm devices */
+	/* set complexity to 0 for single processor arm devices */
 #ifdef __arm__
-	opus_encoder_ctl(d->state, OPUS_SET_COMPLEXITY(0));
+	if (ms_factory_get_cpu_count(f->factory)==1){
+		opus_encoder_ctl(d->state, OPUS_SET_COMPLEXITY(0));
+	}else{
+		opus_encoder_ctl(d->state, OPUS_SET_COMPLEXITY(5));
+	}
 #endif
 	error = opus_encoder_ctl(d->state, OPUS_SET_PACKET_LOSS_PERC(10));
 	if (error != OPUS_OK) {
@@ -245,12 +248,7 @@ static void ms_opus_enc_uninit(MSFilter *f) {
 static void compute_max_bitrate(OpusEncData *d, int ptimeStep) {
 	int normalized_cbr = 0;
 	float pps;
-
-	/* check maxaverage bit rate parameter */
-	if (d->maxaveragebitrate>0 && d->maxaveragebitrate<d->max_network_bitrate) {
-		ms_warning("Opus encoder can't apply network bitrate [%i] because of maxaveragebitrate [%i] requested by fmtp line. Fall back to fmtp bitrate setting.", d->max_network_bitrate, d->maxaveragebitrate);
-		d->max_network_bitrate = d->maxaveragebitrate;
-	}
+	int maxaveragebitrate=510000;
 
 	if (d->ptime==-1) {
 		pps = 50; // if this function is called before ptime being set, use default ptime 20ms
@@ -289,12 +287,14 @@ static void compute_max_bitrate(OpusEncData *d, int ptimeStep) {
 		d->max_network_bitrate = (normalized_cbr/(pps*8) + 12 + 8 + 20) *8*pps;
 		ms_warning("Opus encoder doesn't support bitrate [%i] set to 6kbps, network bitrate [%d]", initial_value, d->max_network_bitrate);
 	}
-
-	if (normalized_cbr>510000) {
+	if (d->maxaveragebitrate>0)
+		maxaveragebitrate=d->maxaveragebitrate;
+	
+	if (normalized_cbr>maxaveragebitrate) {
 		int initial_value = normalized_cbr;
-		normalized_cbr = 510000;
+		normalized_cbr = maxaveragebitrate;
 		d->max_network_bitrate = (normalized_cbr/(pps*8) + 12 + 8 + 20) *8*pps;
-		ms_warning("Opus encoder doesn't support bitrate [%i] set to 510kbps, network bitrate [%d]", initial_value, d->max_network_bitrate);
+		ms_warning("Opus encoder cannot set codec bitrate to [%i] because of maxaveragebitrate constraint or absolute maximum bitrate value. New network bitrate is [%i]", initial_value, d->max_network_bitrate);
 	}
 
 	d->bitrate = normalized_cbr;
@@ -305,46 +305,32 @@ static void apply_max_bitrate(OpusEncData *d) {
 	ms_message("Setting opus codec bitrate to [%i] from network bitrate [%i] with ptime [%i]", d->bitrate, d->max_network_bitrate, d->ptime);
 	/* give the bitrate to the encoder if exists*/
 	if (d->state) {
-		opus_int32 maxBandwidth;
+		opus_int32 maxBandwidth=0;
 
+		/*tell the target bitrate, opus will choose internally the bandwidth to use*/
 		int error = opus_encoder_ctl(d->state, OPUS_SET_BITRATE(d->bitrate));
 		if (error != OPUS_OK) {
 			ms_error("could not set bit rate to opus encoder: %s", opus_strerror(error));
 		}
 
-		/* set output sampling rate according to bitrate and RFC section 3.1.1 */
-		if (d->bitrate<12000) {
+		/* implement maxplaybackrate parameter, which is constraint on top of bitrate */
+		if (d->maxplaybackrate <= 8000) {
 			maxBandwidth = OPUS_BANDWIDTH_NARROWBAND;
-		} else if (d->bitrate<20000) {
+		} else if (d->maxplaybackrate <= 12000) {
+			maxBandwidth = OPUS_BANDWIDTH_MEDIUMBAND;
+		} else if (d->maxplaybackrate <= 16000) {
 			maxBandwidth = OPUS_BANDWIDTH_WIDEBAND;
-		} else if (d->bitrate<40000) {
-			maxBandwidth = OPUS_BANDWIDTH_FULLBAND;
-		} else if (d->bitrate<64000) {
-			maxBandwidth = OPUS_BANDWIDTH_FULLBAND;
+		} else if (d->maxplaybackrate <= 24000) {
+			maxBandwidth = OPUS_BANDWIDTH_SUPERWIDEBAND;
 		} else {
 			maxBandwidth = OPUS_BANDWIDTH_FULLBAND;
 		}
 
-		/* check if selected maxBandwidth is compatible with the maxplaybackrate parameter */
-		if (d->maxplaybackrate < 12000) {
-			maxBandwidth = OPUS_BANDWIDTH_NARROWBAND;
-		} else if (d->maxplaybackrate < 16000) {
-			if (maxBandwidth != OPUS_BANDWIDTH_NARROWBAND) {
-				maxBandwidth = OPUS_BANDWIDTH_MEDIUMBAND;
+		if (maxBandwidth!=0){
+			error = opus_encoder_ctl(d->state, OPUS_SET_MAX_BANDWIDTH(maxBandwidth));
+			if (error != OPUS_OK) {
+				ms_error("could not set max bandwidth to opus encoder: %s", opus_strerror(error));
 			}
-		} else if (d->maxplaybackrate < 24000) {
-			if (maxBandwidth != OPUS_BANDWIDTH_NARROWBAND) {
-				maxBandwidth = OPUS_BANDWIDTH_WIDEBAND;
-			}
-		} else if (d->maxplaybackrate < 48000) {
-			if (maxBandwidth == OPUS_BANDWIDTH_FULLBAND) {
-				maxBandwidth = OPUS_BANDWIDTH_SUPERWIDEBAND;
-			}
-		}
-
-		error = opus_encoder_ctl(d->state, OPUS_SET_MAX_BANDWIDTH(maxBandwidth));
-		if (error != OPUS_OK) {
-			ms_error("could not set max bandwidth to opus encoder: %s", opus_strerror(error));
 		}
 	}
 
@@ -377,9 +363,6 @@ static int ms_opus_enc_set_bitrate(MSFilter *f, void *arg) {
 	int ptimeStepSign = 1;
 	int ptimeTarget = d->ptime;
 	int bitrate = *((int *)arg); // the argument is the network bitrate requested
-
-
-
 
 	/* this function also manage the ptime, check if we are increasing or decreasing the bitrate in order to possibly decrease or increase ptime */
 	if (d->bitrate>0 && d->ptime>0) { /* at first call to set_bitrate(bitrate is initialised at -1), do not modify ptime, neither if it wasn't initialised too */
@@ -516,27 +499,35 @@ static int ms_opus_enc_add_fmtp(MSFilter *f, void *arg) {
 
 	if ( fmtp_get_value ( fmtp,"maxplaybackrate",buf,sizeof ( buf ) ) ) {
 		d->maxplaybackrate=atoi(buf);
-	} else if ( fmtp_get_value ( fmtp,"maxptime",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"maxptime",buf,sizeof ( buf ) ) ) {
 		d->maxptime=MIN(atoi(buf),120);
-	} else if ( fmtp_get_value ( fmtp,"ptime",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"ptime",buf,sizeof ( buf ) ) ) {
 		int val=atoi(buf);
 		ms_opus_enc_set_ptime(f,&val);
-	} else if ( fmtp_get_value ( fmtp,"minptime",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"minptime",buf,sizeof ( buf ) ) ) {
 		d->minptime=MAX(atoi(buf),20); // minimum shall be 3 but we do not provide less than 20ms ptime.
-	} else if ( fmtp_get_value ( fmtp,"maxaveragebitrate",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"maxaveragebitrate",buf,sizeof ( buf ) ) ) {
 		d->maxaveragebitrate = atoi(buf);
-	} else if ( fmtp_get_value ( fmtp,"stereo",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"stereo",buf,sizeof ( buf ) ) ) {
 		d->stereo = atoi(buf);
-	} else if ( fmtp_get_value ( fmtp,"cbr",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"cbr",buf,sizeof ( buf ) ) ) {
 		if (atoi(buf) == 1 ) {
 			d->vbr = 0;
 		} else {
 			d->vbr = 1;
 		}
 		ms_opus_enc_set_vbr(f);
-	} else if ( fmtp_get_value ( fmtp,"useinbandfec",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"useinbandfec",buf,sizeof ( buf ) ) ) {
 		d->useinbandfec = atoi(buf);
-	} else if ( fmtp_get_value ( fmtp,"usedtx",buf,sizeof ( buf ) ) ) {
+	}
+	if ( fmtp_get_value ( fmtp,"usedtx",buf,sizeof ( buf ) ) ) {
 		d->usedtx = atoi(buf);
 	}
 
@@ -696,20 +687,23 @@ static void ms_opus_dec_process(MSFilter *f) {
 
 		// try fec : info are stored in the next packet, do we have it?
 		if (d->rtp_picker_context.picker) {
-			im = d->rtp_picker_context.picker(&d->rtp_picker_context,d->sequence_number+1);
-			if (im) {
-				imLength=rtp_get_payload(im,&payload);
-				d->statsfec++;
-			} else {
-				d->statsplc++;
+			/* FEC information is in the next packet, last valid packet was d->sequence_number, the missing one shall then be d->sequence_number+1, so check jitter buffer for d->sequence_number+2 */
+			/* but we may have the n+1 packet in the buffer and adaptative jitter control keeping it for later, in that case, just go for PLC */
+			if (d->rtp_picker_context.picker(&d->rtp_picker_context,d->sequence_number+1) == NULL) { /* missing packet is really missing */
+				im = d->rtp_picker_context.picker(&d->rtp_picker_context,d->sequence_number+2); /* try to get n+2 */
+				if (im) {
+					imLength=rtp_get_payload(im,&payload);
+				}
 			}
 		}
 		om = allocb(5760 * d->channels * SIGNAL_SAMPLE_SIZE, 0); /* 5760 is the maximum number of sample in a packet (120ms at 48KHz) */
 		/* call to the decoder, we'll have either FEC or PLC, do it on the same length that last received packet */
 		if (payload) { // found frame to try FEC
+			d->statsfec++;
 			frames = opus_decode(d->state, payload, imLength, (opus_int16 *)om->b_wptr, d->lastPacketLength, 1);
 		} else { // do PLC: PLC doesn't seem to be able to generate more than 960 samples (20 ms at 48000 Hz), get PLC until we have the correct number of sample
 			//frames = opus_decode(d->state, NULL, 0, (opus_int16 *)om->b_wptr, d->lastPacketLength, 0); // this should have work if opus_decode returns the requested number of samples
+			d->statsplc++;
 			frames = 0;
 			while (frames < d->lastPacketLength) {
 				frames += opus_decode(d->state, NULL, 0, (opus_int16 *)(om->b_wptr + (frames*d->channels*SIGNAL_SAMPLE_SIZE)), d->lastPacketLength-frames, 0);

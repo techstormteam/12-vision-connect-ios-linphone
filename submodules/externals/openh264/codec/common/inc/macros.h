@@ -42,7 +42,9 @@
 
 #include <math.h>
 #include <assert.h>
+#include <string.h>
 #include "typedefs.h"
+
 
 /*
 * ENFORCE_STACK_ALIGN_1D: force 1 dimension local data aligned in stack
@@ -72,20 +74,10 @@
 #endif
 
 #define ALIGNED_DECLARE( type, var, n ) __declspec(align(n)) type var
-#define __align16(t,v) __declspec(align(16)) t v
-#define ALIGNED_DECLARE_MATRIX_1D(name,size,type,alignment) \
-	__declspec(align(alignment)) type name[(size)]
-#define ALIGNED_DECLARE_MATRIX_2D(name,sizex,sizey,type,alignment) \
-__declspec(align(alignment)) type name[(sizex)*(sizey)]
 
 #elif defined(__GNUC__)
 
 #define ALIGNED_DECLARE( type, var, n ) type var __attribute__((aligned(n)))
-#define __align16(t,v) t v __attribute__ ((aligned (16)))
-#define ALIGNED_DECLARE_MATRIX_1D(name,size,type,alignment) \
-	type name[size] __attribute__((aligned(alignment)))
-#define ALIGNED_DECLARE_MATRIX_2D(name,sizex,sizey,type,alignment) \
-	type name[(sizex)*(sizey)] __attribute__((aligned(alignment)))
 #endif//_MSC_VER
 
 
@@ -124,6 +116,18 @@ __declspec(align(alignment)) type name[(sizex)*(sizey)]
 #ifndef WELS_ROUND
 #define WELS_ROUND(x)	((int32_t)(0.5+(x)))
 #endif//WELS_ROUND
+
+#ifndef WELS_ROUND64
+#define WELS_ROUND64(x)	((int64_t)(0.5+(x)))
+#endif//WELS_ROUND
+
+#ifndef WELS_DIV_ROUND
+#define WELS_DIV_ROUND(x,y)	((int32_t)((y)==0?((x)/((y)+1)):(((y)/2+(x))/(y))))
+#endif//WELS_DIV_ROUND
+
+#ifndef WELS_DIV_ROUND64
+#define WELS_DIV_ROUND64(x,y)	((int64_t)((y)==0?((x)/((y)+1)):(((y)/2+(x))/(y))))
+#endif//WELS_DIV_ROUND64
 
 #define WELS_NON_ZERO_COUNT_AVERAGE(nC,nA,nB) {		\
     nC = nA + nB + 1;                      \
@@ -269,6 +273,37 @@ static inline bool WELS_POWER2_IF (uint32_t v) {
 #define WELS_GCC_UNUSED
 #endif
 
+inline bool CheckInRangeCloseOpen (const int16_t kiCurrent, const int16_t kiMin, const int16_t kiMax) {
+  return ((kiCurrent >= kiMin) && (kiCurrent < kiMax));
+}
 
+static inline void WelsSetMemUint32_c (uint32_t* pDst, uint32_t iValue, int32_t iSizeOfData) {
+  for (int i = 0; i < iSizeOfData; i++) {
+    pDst[i] = iValue;
+  }
+}
+
+static inline void WelsSetMemUint16_c (uint16_t* pDst, uint16_t iValue, int32_t iSizeOfData) {
+  for (int i = 0; i < iSizeOfData; i++) {
+    pDst[i] = iValue;
+  }
+}
+
+inline void WelsSetMemMultiplebytes_c (void* pDst, uint32_t iValue, int32_t iSizeOfData, int32_t iDataLengthOfData) {
+  assert (4 == iDataLengthOfData || 2 == iDataLengthOfData || 1 == iDataLengthOfData);
+
+  // TODO: consider add assembly for these functions
+  if (0 != iValue) {
+    if (4 == iDataLengthOfData) {
+      WelsSetMemUint32_c (static_cast<uint32_t*> (pDst), static_cast<uint32_t> (iValue), iSizeOfData);
+    } else if (2 == iDataLengthOfData) {
+      WelsSetMemUint16_c (static_cast<uint16_t*> (pDst), static_cast<uint16_t> (iValue), iSizeOfData);
+    } else {
+      memset (static_cast<uint8_t*> (pDst), static_cast<uint8_t> (iValue), iSizeOfData);
+    }
+  } else {
+    memset (static_cast<uint8_t*> (pDst), 0, iSizeOfData * iDataLengthOfData);
+  }
+}
 
 #endif//WELS_MACRO_UTILIZATIONS_H__

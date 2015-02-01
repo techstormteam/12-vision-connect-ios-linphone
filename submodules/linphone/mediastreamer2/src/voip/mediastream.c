@@ -18,29 +18,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 
-#include "ortp/port.h"
-#include "ortp/ortp_srtp.h"
-#include "ortp/b64.h"
-
-#include "mediastreamer2/mediastream.h"
-#include "private.h"
-
-#ifdef ORTP_HAVE_SRTP
-#if defined(ANDROID) || (defined(WIN32) && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP))
-// Android and Windows phone don't use make install
-#include <srtp_priv.h>
-#else
-#include <srtp/srtp_priv.h>
-#endif
-
-#endif /*ORTP_HAVE_SRTP*/
-
-#include <ctype.h>
-
-
 #ifdef HAVE_CONFIG_H
 #include "mediastreamer-config.h"
 #endif
+
+#include "ortp/port.h"
+#include "mediastreamer2/mediastream.h"
+#include "private.h"
+#include <ctype.h>
+
 
 
 #ifndef MS_MINIMAL_MTU
@@ -149,7 +135,7 @@ MSTickerPrio __ms_get_default_prio(bool_t is_video) {
 #endif
 }
 
-RtpSession * create_duplex_rtpsession(int loc_rtp_port, int loc_rtcp_port, bool_t ipv6) {
+RtpSession * create_duplex_rtpsession(const char* local_ip, int loc_rtp_port, int loc_rtcp_port) {
 	RtpSession *rtpr;
 
 	rtpr = rtp_session_new(RTP_SESSION_SENDRECV);
@@ -158,11 +144,12 @@ RtpSession * create_duplex_rtpsession(int loc_rtp_port, int loc_rtcp_port, bool_
 	rtp_session_set_blocking_mode(rtpr, 0);
 	rtp_session_enable_adaptive_jitter_compensation(rtpr, TRUE);
 	rtp_session_set_symmetric_rtp(rtpr, TRUE);
-	rtp_session_set_local_addr(rtpr, ipv6 ? "::" : "0.0.0.0", loc_rtp_port, loc_rtcp_port);
-	rtp_session_signal_connect(rtpr, "timestamp_jump", (RtpCallback)rtp_session_resync, (long)NULL);
-	rtp_session_signal_connect(rtpr, "ssrc_changed", (RtpCallback)rtp_session_resync, (long)NULL);
+	rtp_session_set_local_addr(rtpr, local_ip, loc_rtp_port, loc_rtcp_port);
+	rtp_session_signal_connect(rtpr, "timestamp_jump", (RtpCallback)rtp_session_resync, NULL);
+	rtp_session_signal_connect(rtpr, "ssrc_changed", (RtpCallback)rtp_session_resync, NULL);
 	rtp_session_set_ssrc_changed_threshold(rtpr, 0);
 	rtp_session_set_rtcp_report_interval(rtpr, 2500);	/* At the beginning of the session send more reports. */
+	rtp_session_set_multicast_loopback(rtpr,TRUE); /*very useful, specially for testing purposes*/
 	disable_checksums(rtp_session_get_rtp_socket(rtpr));
 	return rtpr;
 }
@@ -185,16 +172,24 @@ const char * media_stream_type_str(MediaStream *stream) {
 
 void ms_media_stream_sessions_uninit(MSMediaStreamSessions *sessions){
 	if (sessions->srtp_session) {
-		ortp_srtp_dealloc(sessions->srtp_session);
+		ms_srtp_dealloc(sessions->srtp_session);
 		sessions->srtp_session=NULL;
+	}
+	if (sessions->srtp_rtcp_session) {
+		ms_srtp_dealloc(sessions->srtp_rtcp_session);
+		sessions->srtp_rtcp_session=NULL;
 	}
 	if (sessions->rtp_session) {
 		rtp_session_destroy(sessions->rtp_session);
 		sessions->rtp_session=NULL;
 	}
 	if (sessions->zrtp_context != NULL) {
-		ortp_zrtp_context_destroy(sessions->zrtp_context);
+		ms_zrtp_context_destroy(sessions->zrtp_context);
 		sessions->zrtp_context = NULL;
+	}
+	if (sessions->dtls_context != NULL) {
+		ms_dtls_srtp_context_destroy(sessions->dtls_context);
+		sessions->dtls_context = NULL;
 	}
 	if (sessions->ticker){
 		ms_ticker_destroy(sessions->ticker);
@@ -250,196 +245,13 @@ void media_stream_enable_adaptive_jittcomp(MediaStream *stream, bool_t enabled) 
 	rtp_session_enable_adaptive_jitter_compensation(stream->sessions.rtp_session, enabled);
 }
 
-#ifdef ORTP_HAVE_SRTP
-
-static int check_srtp_session_created(MediaStream *stream){
-	if (stream->sessions.srtp_session==NULL){
-		err_status_t err;
-		srtp_t session;
-		RtpTransport *rtp=NULL,*rtcp=NULL;
-		RtpTransportModifier *rtp_modifier, *rtcp_modifier;
-
-		err = ortp_srtp_create(&session, NULL);
-		if (err != 0) {
-			ms_error("Failed to create srtp session (%d)", err);
-			return -1;
-		}
-		stream->sessions.srtp_session=session;
-		srtp_transport_modifier_new(session,&rtp_modifier,&rtcp_modifier);
-		rtp_session_get_transports(stream->sessions.rtp_session,&rtp,&rtcp);
-		/*if transports are set, we assume they are meta transporters, otherwise create them*/
-		if (rtp==NULL&&rtcp==NULL){
-			meta_rtp_transport_new(&rtp, TRUE, NULL, 0);
-			meta_rtp_transport_new(&rtcp, FALSE, NULL, 0);
-		}
-		meta_rtp_transport_append_modifier(rtp, rtp_modifier);
-		meta_rtp_transport_append_modifier(rtcp, rtcp_modifier);
-		rtp_session_set_transports(stream->sessions.rtp_session,rtp,rtcp);
-		stream->sessions.is_secured=TRUE;
-	}
-	return 0;
-}
-
-static int add_srtp_stream(srtp_t srtp, MSCryptoSuite suite, uint32_t ssrc, const char* b64_key, bool_t inbound)
-{
-	srtp_policy_t policy;
-	uint8_t* key;
-	int key_size;
-	err_status_t err;
-	unsigned b64_key_length = strlen(b64_key);
-	ssrc_t ssrc_conf;
-
-	memset(&policy,0,sizeof(policy));
-
-	switch(suite){
-		case MS_AES_128_SHA1_32:
-			crypto_policy_set_aes_cm_128_hmac_sha1_32(&policy.rtp);
-			// srtp doc says: not adapted to rtcp...
-			crypto_policy_set_aes_cm_128_hmac_sha1_32(&policy.rtcp);
-			break;
-		case MS_AES_128_NO_AUTH:
-			crypto_policy_set_aes_cm_128_null_auth(&policy.rtp);
-			// srtp doc says: not adapted to rtcp...
-			crypto_policy_set_aes_cm_128_null_auth(&policy.rtcp);
-			break;
-		case MS_NO_CIPHER_SHA1_80:
-			crypto_policy_set_null_cipher_hmac_sha1_80(&policy.rtp);
-			crypto_policy_set_null_cipher_hmac_sha1_80(&policy.rtcp);
-			break;
-		case MS_AES_128_SHA1_80: /*default mode*/
-			crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy.rtp);
-			crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy.rtcp);
-			break;
-		case MS_AES_256_SHA1_80:
-			crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy.rtp);
-			crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy.rtcp);
-			break;
-		case MS_AES_256_SHA1_32:
-			crypto_policy_set_aes_cm_256_hmac_sha1_32(&policy.rtp);
-			crypto_policy_set_aes_cm_256_hmac_sha1_32(&policy.rtcp);
-			break;
-		case MS_CRYPTO_SUITE_INVALID:
-			return -1;
-			break;
-	}
-	key_size = b64_decode(b64_key, b64_key_length, 0, 0);
-	if (key_size != policy.rtp.cipher_key_len) {
-		ortp_error("Key size (%d) doesn't match the selected srtp profile (required %d)",
-			key_size,
-			policy.rtp.cipher_key_len);
-			return -1;
-	}
-	key = (uint8_t*) ortp_malloc0(key_size+2); /*srtp uses padding*/
-	if (b64_decode(b64_key, b64_key_length, key, key_size) != key_size) {
-		ortp_error("Error decoding key");
-		ortp_free(key);
-		return -1;
-	}
-	if (!inbound)
-		policy.allow_repeat_tx=1; /*necessary for telephone-events*/
-
-	/*ssrc_conf.type=inbound ? ssrc_any_inbound : ssrc_specific;*/
-	ssrc_conf.type=ssrc_specific;
-	ssrc_conf.value=ssrc;
-
-	policy.ssrc = ssrc_conf;
-	policy.key = key;
-	policy.next = NULL;
-
-	err = srtp_add_stream(srtp, &policy);
-	if (err != err_status_ok) {
-		ortp_error("Failed to add stream to srtp session (%d)", err);
-		ortp_free(key);
-		return -1;
-	}
-
-	ortp_free(key);
-	return 0;
-}
-
-static uint32_t find_other_ssrc(srtp_t srtp, uint32_t ssrc){
-	srtp_stream_ctx_t *stream;
-	for (stream=srtp->stream_list;stream!=NULL;stream=stream->next){
-		if (stream->ssrc!=ssrc) return stream->ssrc;
-	}
-	return 0;
-}
-
-#endif
-
-#ifdef ORTP_HAVE_SRTP
-#define _ORTP_HAVE_SRTP 1
-#else
-#define _ORTP_HAVE_SRTP 0
-#endif
-
-bool_t media_stream_srtp_supported(void){
-	return _ORTP_HAVE_SRTP & ortp_srtp_supported();
-}
-
-int media_stream_set_srtp_recv_key(MediaStream *stream, MSCryptoSuite suite, const char* key){
-
-	if (!media_stream_srtp_supported()) {
-		ms_error("ortp srtp support disabled in oRTP or mediastreamer2");
-		return -1;
-	}
-#ifdef ORTP_HAVE_SRTP
-	{
-		uint32_t ssrc,send_ssrc;
-		bool_t updated=FALSE;
-
-		if (check_srtp_session_created(stream)==-1)
-			return -1;
-
-		/*check if a previous key was configured, in which case remove it*/
-		send_ssrc=rtp_session_get_send_ssrc(stream->sessions.rtp_session);
-		ssrc=find_other_ssrc(stream->sessions.srtp_session,htonl(send_ssrc));
-
-		/*careful: remove_stream takes the SSRC in network byte order...*/
-		if (ortp_srtp_remove_stream(stream->sessions.srtp_session,ssrc)==0)
-			updated=TRUE;
-		ssrc=rtp_session_get_recv_ssrc(stream->sessions.rtp_session);
-		ms_message("media_stream_set_srtp_recv_key(): %s key %s",updated ? "changing to" : "starting with", key);
-		return add_srtp_stream(stream->sessions.srtp_session,suite,ssrc,key,TRUE);
-	}
-#else
-	return -1;
-#endif
-}
-
-int media_stream_set_srtp_send_key(MediaStream *stream, MSCryptoSuite suite, const char* key){
-
-	if (!media_stream_srtp_supported()) {
-		ms_error("ortp srtp support disabled in oRTP or mediastreamer2");
-		return -1;
-	}
-
-#ifdef ORTP_HAVE_SRTP
-	{
-		uint32_t ssrc;
-		bool_t updated=FALSE;
-
-		if (check_srtp_session_created(stream)==-1)
-			return -1;
-
-		/*check if a previous key was configured, in which case remove it*/
-		ssrc=rtp_session_get_send_ssrc(stream->sessions.rtp_session);
-		if (ssrc!=0){
-			/*careful: remove_stream takes the SSRC in network byte order...*/
-			if (ortp_srtp_remove_stream(stream->sessions.srtp_session,htonl(ssrc))==0)
-				updated=TRUE;
-		}
-		ms_message("media_stream_set_srtp_send_key(): %s key %s",updated ? "changing to" : "starting with", key);
-		return add_srtp_stream(stream->sessions.srtp_session,suite,ssrc,key,FALSE);
-	}
-#else
-	return -1;
-#endif
+bool_t media_stream_dtls_supported(void){
+	return ms_dtls_srtp_available();
 }
 
 /*deprecated*/
 bool_t media_stream_enable_srtp(MediaStream *stream, MSCryptoSuite suite, const char *snd_key, const char *rcv_key) {
-	return media_stream_set_srtp_recv_key(stream,suite,rcv_key)==0 && media_stream_set_srtp_send_key(stream,suite,snd_key)==0;
+	return media_stream_set_srtp_recv_key_b64(&(stream->sessions),suite,rcv_key)==0 && media_stream_set_srtp_send_key_b64(&(stream->sessions),suite,snd_key)==0;
 }
 
 const MSQualityIndicator *media_stream_get_quality_indicator(MediaStream *stream){
@@ -464,6 +276,37 @@ bool_t ms_is_ipv6(const char *remote) {
 	return ret;
 }
 
+bool_t ms_is_multicast_addr(const struct sockaddr *addr) {
+
+	switch (addr->sa_family) {
+		case AF_INET:
+			return IN_MULTICAST(ntohl(((struct sockaddr_in *) addr)->sin_addr.s_addr));
+		case AF_INET6:
+			return IN6_IS_ADDR_MULTICAST(&(((struct sockaddr_in6 *) addr)->sin6_addr));
+		default:
+			return FALSE;
+	}
+
+}
+bool_t ms_is_multicast(const char *address) {
+	bool_t ret = FALSE;
+	struct addrinfo hints, *res0;
+	int err;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	err = getaddrinfo(address,"8000", &hints, &res0);
+	if (err != 0) {
+		ms_warning("get_local_addr_for: %s", gai_strerror(err));
+		return FALSE;
+	}
+	ret = ms_is_multicast_addr(res0->ai_addr);
+
+	freeaddrinfo(res0);
+	return ret;
+
+}
 bool_t mediastream_payload_type_changed(RtpSession *session, unsigned long data) {
 	MediaStream *stream = (MediaStream *)data;
 	int pt = rtp_session_get_recv_payload_type(stream->sessions.rtp_session);
@@ -514,6 +357,10 @@ void media_stream_iterate(MediaStream *stream){
 				OrtpEventData *evd=ortp_event_get_data(ev);
 				stream->sessions.is_secured=evd->info.zrtp_stream_encrypted;
 				ms_message("%s_stream_iterate[%p]: is %s ",media_stream_type_str(stream) , stream, stream->sessions.is_secured ? "encrypted" : "not encrypted");
+			} else if (evt == ORTP_EVENT_DTLS_ENCRYPTION_CHANGED) {
+				OrtpEventData *evd=ortp_event_get_data(ev);
+				stream->sessions.is_secured=evd->info.dtls_stream_encrypted;
+				ms_message("%s_stream_iterate[%p]: is %s ",media_stream_type_str(stream) , stream, stream->sessions.is_secured ? "encrypted" : "not encrypted");
 			}
 			ortp_event_destroy(ev);
 		}
@@ -521,7 +368,12 @@ void media_stream_iterate(MediaStream *stream){
 }
 
 bool_t media_stream_alive(MediaStream *ms, int timeout){
-	const rtp_stats_t *stats=rtp_session_get_stats(ms->sessions.rtp_session);
+	const rtp_stats_t *stats;
+	
+	if (ms->state!=MSStreamStarted){
+		return TRUE;
+	}
+	stats=rtp_session_get_stats(ms->sessions.rtp_session);
 	if (stats->recv!=0){
 		if (stats->recv!=ms->last_packet_count){
 			ms->last_packet_count=stats->recv;
@@ -573,11 +425,19 @@ int media_stream_get_target_network_bitrate(const MediaStream *stream) {
 }
 
 float media_stream_get_up_bw(const MediaStream *stream) {
-	return rtp_session_get_send_bandwidth(stream->sessions.rtp_session);
+	return rtp_session_get_rtp_send_bandwidth(stream->sessions.rtp_session);
 }
 
 float media_stream_get_down_bw(const MediaStream *stream) {
-	return rtp_session_get_recv_bandwidth(stream->sessions.rtp_session);
+	return rtp_session_get_rtp_recv_bandwidth(stream->sessions.rtp_session);
+}
+
+float media_stream_get_rtcp_up_bw(const MediaStream *stream) {
+	return rtp_session_get_rtcp_send_bandwidth(stream->sessions.rtp_session);
+}
+
+float media_stream_get_rtcp_down_bw(const MediaStream *stream) {
+	return rtp_session_get_rtcp_recv_bandwidth(stream->sessions.rtp_session);
 }
 
 void media_stream_reclaim_sessions(MediaStream *stream, MSMediaStreamSessions *sessions){

@@ -37,7 +37,7 @@ public:
 	void resetFirstImageDecoded();
 	MSVideoSize getSize() const;
 	float getFps()const;
-
+	const MSFmtDescriptor *getOutFmt()const;
 private:
 	int nalusToFrame(MSQueue *nalus);
 	void enlargeBitstream(int newSize);
@@ -47,7 +47,6 @@ private:
 	int32_t getVCLNal();
 
 	MSFilter *mFilter;
-	SDecodingParam mDecoderParams;
 	ISVCDecoder *mDecoder;
 	Rfc3984Context *mUnpacker;
 	MSPicture mOutbuf;

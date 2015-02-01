@@ -208,7 +208,6 @@ void rtp_session_rtp_parse(RtpSession *session, mblk_t *mp, uint32_t local_str_t
 				session->inc_ssrc_candidate=rtp->ssrc;
 			}
 			if (session->inc_same_ssrc_count>=session->rtp.ssrc_changed_thres){
-
 				/* store the sender rtp address to do symmetric RTP */
 				if (!session->use_connect){
 					if (session->rtp.gs.socket>0 && session->symmetric_rtp){
@@ -271,7 +270,7 @@ void rtp_session_rtp_parse(RtpSession *session, mblk_t *mp, uint32_t local_str_t
 	}
 
 	/* check for possible telephone events */
-	if (rtp->paytype==session->rcv.telephone_events_pt){
+	if (rtp_profile_is_telephone_event(session->snd.profile, rtp->paytype)){
 		queue_packet(&session->rtp.tev_rq,session->rtp.max_rq_size,mp,rtp,&discarded,&duplicate);
 		stats->discarded+=discarded;
 		ortp_global_stats.discarded+=discarded;
@@ -288,6 +287,12 @@ void rtp_session_rtp_parse(RtpSession *session, mblk_t *mp, uint32_t local_str_t
 		rtp_session_update_payload_type(session,rtp->paytype);
 	}
 
+	/* Drop the packets while the RTP_SESSION_FLUSH flag is set. */
+	if (session->flags & RTP_SESSION_FLUSH) {
+		freemsg(mp);
+		return;
+	}
+
 	jitter_control_new_packet(&session->rtp.jittctl,rtp->timestamp,local_str_ts);
 
 	update_rtcp_xr_stat_summary(session, mp, local_str_ts);
@@ -295,17 +300,19 @@ void rtp_session_rtp_parse(RtpSession *session, mblk_t *mp, uint32_t local_str_t
 	if (session->flags & RTP_SESSION_FIRST_PACKET_DELIVERED) {
 		/* detect timestamp important jumps in the future, to workaround stupid rtp senders */
 		if (RTP_TIMESTAMP_IS_NEWER_THAN(rtp->timestamp,session->rtp.rcv_last_ts+session->rtp.ts_jump)){
-			ortp_debug("rtp_parse: timestamp jump?");
+			ortp_warning("rtp_parse: timestamp jump in the future detected.");
 			rtp_signal_table_emit2(&session->on_timestamp_jump,(long)&rtp->timestamp);
 		}
-		else if (RTP_TIMESTAMP_IS_STRICTLY_NEWER_THAN(session->rtp.rcv_last_ts,rtp->timestamp)){
-			/* don't queue packets older than the last returned packet to the application*/
+		else if (RTP_TIMESTAMP_IS_STRICTLY_NEWER_THAN(session->rtp.rcv_last_ts,rtp->timestamp) 
+			|| RTP_SEQ_IS_STRICTLY_GREATER_THAN(session->rtp.rcv_last_seq,rtp->seq_number)){
+			/* don't queue packets older than the last returned packet to the application, or whose sequence number
+			 is behind the last packet returned to the application*/
 			/* Call timstamp jumb in case of
 			 * large negative Ts jump or if ts is set to 0
 			*/
 
 			if ( RTP_TIMESTAMP_IS_STRICTLY_NEWER_THAN(session->rtp.rcv_last_ts, rtp->timestamp + session->rtp.ts_jump) ){
-				ortp_warning("rtp_parse: negative timestamp jump");
+				ortp_warning("rtp_parse: negative timestamp jump detected");
 				rtp_signal_table_emit2(&session->on_timestamp_jump,
 							(long)&rtp->timestamp);
 			}
