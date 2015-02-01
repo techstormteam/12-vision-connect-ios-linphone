@@ -36,7 +36,6 @@
 @synthesize editView;
 @synthesize tableView;
 @synthesize contactDetailsDelegate;
-@synthesize popoverController;
 
 #pragma mark - Lifecycle Functions
 
@@ -124,7 +123,7 @@
     
     // Avatar image
     {
-        UIImage *image = [FastAddressBook getContactImage:contact thumbnail:false];
+        UIImage *image = [FastAddressBook getContactImage:contact thumbnail:true];
         if(image == nil) {
             image = [UIImage imageNamed:@"avatar_unknown_small.png"];
         }
@@ -244,13 +243,11 @@
 
 - (IBAction)onAvatarClick:(id)event {
     if(self.isEditing) {
-        void (^showAppropriateController)(UIImagePickerControllerSourceType) = ^(UIImagePickerControllerSourceType type) {
+        void (^block)(UIImagePickerControllerSourceType) = ^(UIImagePickerControllerSourceType type) {
             UICompositeViewDescription *description = [ImagePickerViewController compositeViewDescription];
             ImagePickerViewController *controller;
             if([LinphoneManager runningOnIpad]) {
                 controller = DYNAMIC_CAST([[PhoneMainView instance].mainViewController getCachedController:description.content], ImagePickerViewController);
-				// keep a reference to this controller so that in case of memory pressure we keep it
-				self.popoverController = controller;
             } else {
                 controller = DYNAMIC_CAST([[PhoneMainView instance] changeCurrentView:description push:TRUE], ImagePickerViewController);
             }
@@ -274,12 +271,12 @@
         DTActionSheet *sheet = [[[DTActionSheet alloc] initWithTitle:NSLocalizedString(@"Select picture source",nil)] autorelease];
         if([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
             [sheet addButtonWithTitle:NSLocalizedString(@"Camera",nil) block:^(){
-                showAppropriateController(UIImagePickerControllerSourceTypeCamera);
+                block(UIImagePickerControllerSourceTypeCamera);
             }];
         }
         if([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) {
             [sheet addButtonWithTitle:NSLocalizedString(@"Photo library",nil) block:^(){
-                showAppropriateController(UIImagePickerControllerSourceTypePhotoLibrary);
+                block(UIImagePickerControllerSourceTypePhotoLibrary);
             }];
         }
         if([FastAddressBook getContactImage:contact thumbnail:true] != nil) {
@@ -291,10 +288,8 @@
                 [self update];
             }];
         }
-		[sheet addCancelButtonWithTitle:NSLocalizedString(@"Cancel",nil) block:^{
-			self.popoverController = nil;
-		}];
-
+        [sheet addCancelButtonWithTitle:NSLocalizedString(@"Cancel",nil) block:nil];
+        
         [sheet showInView:[PhoneMainView instance].view];
     }
 }
@@ -309,25 +304,19 @@
         ImagePickerViewController *controller = DYNAMIC_CAST([[PhoneMainView instance].mainViewController getCachedController:description.content], ImagePickerViewController);
         if(controller != nil) {
             [controller.popoverController dismissPopoverAnimated:TRUE];
-			self.popoverController = nil;
         }
     }
-	FastAddressBook* fab = [LinphoneManager instance].fastAddressBook;
     NSError* error = NULL;
     if(!ABPersonRemoveImageData(contact, (CFErrorRef*)error)) {
         [LinphoneLogger log:LinphoneLoggerLog format:@"Can't remove entry: %@", [error localizedDescription]];
     }
     NSData *dataRef = UIImageJPEGRepresentation(image, 0.9f);
     CFDataRef cfdata = CFDataCreate(NULL,[dataRef bytes], [dataRef length]);
-
-	[fab saveAddressBook];
-
-	if(!ABPersonSetImageData(contact, cfdata, (CFErrorRef*)error)) {
-		[LinphoneLogger log:LinphoneLoggerLog format:@"Can't add entry: %@", [error localizedDescription]];
-	} else {
-		[fab saveAddressBook];
-	}
-
+                                    
+    if(!ABPersonSetImageData(contact, cfdata, (CFErrorRef*)error)) {
+        [LinphoneLogger log:LinphoneLoggerLog format:@"Can't add entry: %@", [error localizedDescription]];
+    }
+    
     CFRelease(cfdata);
     
     [self update];
@@ -350,8 +339,7 @@
 
 - (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string {
     if(contactDetailsDelegate != nil) {
-		//add a mini delay to have the text updated BEFORE notifying the selector
-        [self performSelector:@selector(updateModification) withObject:nil afterDelay:0.1];
+        [self performSelector:@selector(updateModification) withObject:nil afterDelay:0];
     }
     return YES;
 }
@@ -375,8 +363,7 @@
         [LinphoneLogger logc:LinphoneLoggerWarning format:"Not valid UIEditableTableViewCell"];
     }
     if(contactDetailsDelegate != nil) {
-		//add a mini delay to have the text updated BEFORE notifying the selector
-        [self performSelector:@selector(updateModification) withObject:nil afterDelay:0.1];
+        [self performSelector:@selector(updateModification) withObject:nil afterDelay:0];
     }
     return TRUE;
 }

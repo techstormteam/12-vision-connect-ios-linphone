@@ -185,7 +185,7 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 		[self transformCodecsToKeys: linphone_core_get_audio_codecs(lc)];
 		[self transformCodecsToKeys: linphone_core_get_video_codecs(lc)];
 		[self setBool:linphone_core_adaptive_rate_control_enabled(lc) forKey:@"adaptive_rate_control_preference"];
-		[self setString:linphone_core_get_adaptive_rate_algorithm(lc) forKey:@"adaptive_rate_algorithm_preference"];
+//		[self setString:linphone_core_get_adaptive_rate_algorithm(lc) forKey:@"adaptive_rate_algorithm_preference"];
 		
 		[self setInteger:lp_config_get_int(conf, "audio", "codec_bitrate_limit", kLinphoneAudioVbrCodecDefaultBitrate) forKey:@"audio_codec_bitrate_limit_preference"];
         [self setInteger:lp_config_get_int(conf, LINPHONERC_APPLICATION_KEY, "voiceproc_preference", 1) forKey:@"voiceproc_preference"];
@@ -204,6 +204,7 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 		}
 		[self setString:val forKey:@"media_encryption_preference"];
 	}
+	[self setString: lp_config_get_string(conf, LINPHONERC_APPLICATION_KEY, "rotation_preference", "auto") forKey:@"rotation_preference"];
 	[self setBool: lp_config_get_int(conf, LINPHONERC_APPLICATION_KEY, "edge_opt_preference", 0) forKey:@"edge_opt_preference"];
 	[self setBool: lp_config_get_int(conf, LINPHONERC_APPLICATION_KEY, "enable_first_login_view_preference", 0) forKey:@"enable_first_login_view_preference"];
 	[self setBool: lp_config_get_int(conf, LINPHONERC_APPLICATION_KEY, "debugenable_preference", 0) forKey:@"debugenable_preference"];
@@ -292,10 +293,6 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 	[alertview release];
 }
 
-+ (BOOL)hasSipPrefix:(NSString*)str {
-    return [str hasPrefix:@"sip:"] || [str hasPrefix:@"sips:"];
-}
-
 - (void)synchronizeAccount {
 	LinphoneCore *lc = [LinphoneManager getLc];
 	LpConfig*   conf = linphone_core_get_config(lc);
@@ -355,11 +352,9 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 		if( isWifiOnly && [LinphoneManager instance].connectivity == wwan ) expire = 0;
 
 		if ((!proxyAddress || [proxyAddress length] <1 ) && domain) {
-			proxyAddress = domain;
-        }
-
-        if( ![LinphoneCoreSettingsStore hasSipPrefix:proxyAddress] ) {
-			proxyAddress = [NSString stringWithFormat:@"sip:%@",proxyAddress];
+			proxyAddress = [NSString stringWithFormat:@"sip:%@",domain] ;
+		} else {
+			proxyAddress = [NSString stringWithFormat:@"sip:%@",proxyAddress] ;
 		}
 
 		char* proxy = ms_strdup([proxyAddress cStringUsingEncoding:[NSString defaultCStringEncoding]]);
@@ -412,7 +407,7 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 		}
 
 		lp_config_set_int(conf, LINPHONERC_APPLICATION_KEY, "pushnotification_preference", pushnotification);
-		[[LinphoneManager instance] configurePushTokenForProxyConfig:proxyCfg];
+		if( pushnotification ) [[LinphoneManager instance] addPushTokenToProxyConfig:proxyCfg];
 
 		linphone_proxy_config_enable_register(proxyCfg, true);
 		linphone_proxy_config_enable_avpf(proxyCfg, use_avpf);
@@ -483,14 +478,14 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 		bool range = [match rangeAtIndex:2].length > 0;
 		if(!range) {
 			NSRange rangeMinPort = [match rangeAtIndex:1];
-			*minPort = [LinphoneCoreSettingsStore validPort:[[text substringWithRange:rangeMinPort] intValue]];
+			*minPort = [LinphoneCoreSettingsStore validPort:[[text substringWithRange:rangeMinPort] integerValue]];
 			*maxPort = *minPort;
 			return TRUE;
 		} else {
 			NSRange rangeMinPort = [match rangeAtIndex:1];
-			*minPort = [LinphoneCoreSettingsStore validPort:[[text substringWithRange:rangeMinPort] intValue]];
+			*minPort = [LinphoneCoreSettingsStore validPort:[[text substringWithRange:rangeMinPort] integerValue]];
 			NSRange rangeMaxPort = [match rangeAtIndex:4];
-			*maxPort = [LinphoneCoreSettingsStore validPort:[[text substringWithRange:rangeMaxPort] intValue]];
+			*maxPort = [LinphoneCoreSettingsStore validPort:[[text substringWithRange:rangeMaxPort] integerValue]];
 			if(*minPort > *maxPort) {
 				*minPort = *maxPort;
 			}
@@ -544,9 +539,9 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 	lp_config_set_int(config, "audio", "codec_bitrate_limit", [self integerForKey:@"audio_codec_bitrate_limit_preference"]);
 	[[LinphoneManager instance] configureVbrCodecs];
 	linphone_core_enable_adaptive_rate_control(lc, [self boolForKey:@"adaptive_rate_control_preference"]);
-	linphone_core_set_adaptive_rate_algorithm(lc, [
-                                                   [self stringForKey:@"adaptive_rate_algorithm_preference"] cStringUsingEncoding:[NSString defaultCStringEncoding]
-                                                   ]);
+//	linphone_core_set_adaptive_rate_algorithm(lc, [
+//                                                   [self stringForKey:@"adaptive_rate_algorithm_preference"] cStringUsingEncoding:[NSString defaultCStringEncoding]
+//                                                   ]);
 
 	// Voice processing
 	BOOL voice_processing = [self boolForKey:@"voiceproc_preference"];
@@ -683,10 +678,18 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 	BOOL edgeOpt = [self boolForKey:@"edge_opt_preference"];
 	lp_config_set_int(config, LINPHONERC_APPLICATION_KEY, "edge_opt_preference", edgeOpt);
 
+	NSString *landscape = [self stringForKey:@"rotation_preference"];
+	lp_config_set_string(config, LINPHONERC_APPLICATION_KEY, "rotation_preference", [landscape UTF8String]);
+
 	BOOL debugmode = [self boolForKey:@"debugenable_preference"];
 	lp_config_set_int(config, LINPHONERC_APPLICATION_KEY, "debugenable_preference", debugmode);
-	[[LinphoneManager instance] setLogsEnabled:debugmode];
-	
+	if (debugmode) {
+		linphone_core_enable_logs_with_cb((OrtpLogFunc)linphone_iphone_log_handler);
+		ortp_set_log_level_mask(ORTP_DEBUG|ORTP_MESSAGE|ORTP_WARNING|ORTP_ERROR|ORTP_FATAL);
+	} else {
+		linphone_core_disable_logs();
+	}
+
 	BOOL animations = [self boolForKey:@"animations_preference"];
 	lp_config_set_int(config, LINPHONERC_APPLICATION_KEY, "animations_preference", animations);
 

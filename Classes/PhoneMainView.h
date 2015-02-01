@@ -41,6 +41,7 @@
 #import "FirstLoginViewController.h"
 #import "WizardViewController.h"
 #import "IncomingCallViewController.h"
+#import "ConsoleViewController.h"
 #import "ImageViewController.h"
 
 
@@ -61,6 +62,7 @@
 @interface PhoneMainView : UIViewController<IncomingCallViewDelegate> {
     @private
     NSMutableArray *inhibitedEvents;
+    NSTimer *batteryTimer;
 }
 
 @property (nonatomic, retain) IBOutlet UIView *statusBarBG;

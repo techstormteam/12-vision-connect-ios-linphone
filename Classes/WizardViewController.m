@@ -26,8 +26,6 @@
 #import <XMLRPCResponse.h>
 #import <XMLRPCRequest.h>
 
-#import "DTAlertView.h"
-
 typedef enum _ViewElement {
     ViewElement_Username            = 100,
     ViewElement_Password            = 101,
@@ -112,7 +110,6 @@ typedef enum _ViewElement {
     [provisionedUsername release];
     [provisionedPassword release];
     [provisionedDomain release];
-    [_transportChooser release];
     [super dealloc];
 }
 
@@ -421,14 +418,15 @@ static UICompositeViewDescription *compositeDescription = nil;
 - (void)setDefaultSettings:(LinphoneProxyConfig*)proxyCfg {
     LinphoneManager* lm = [LinphoneManager instance];
 
-	[lm configurePushTokenForProxyConfig:proxyCfg];
-
+    BOOL pushnotification = [lm lpConfigBoolForKey:@"pushnotification_preference"];
+    if(pushnotification) {
+        [lm addPushTokenToProxyConfig:proxyCfg];
+    }
 }
 
-- (BOOL)addProxyConfig:(NSString*)username password:(NSString*)password domain:(NSString*)domain withTransport:(NSString*)transport {
+- (void)addProxyConfig:(NSString*)username password:(NSString*)password domain:(NSString*)domain {
     LinphoneCore* lc = [LinphoneManager getLc];
 	LinphoneProxyConfig* proxyCfg = linphone_core_create_proxy_config(lc);
-	NSString* server_address = domain;
 
     char normalizedUserName[256];
     linphone_proxy_config_normalize_number(proxyCfg, [username cStringUsingEncoding:[NSString defaultCStringEncoding]], normalizedUserName, sizeof(normalizedUserName));
@@ -440,37 +438,16 @@ static UICompositeViewDescription *compositeDescription = nil;
     linphone_address_set_username(linphoneAddress, normalizedUserName);
 
     if( domain && [domain length] != 0) {
-		if( transport != nil ){
-			server_address = [NSString stringWithFormat:@"%@;transport=%@", server_address, [transport lowercaseString]];
-		}
         // when the domain is specified (for external login), take it as the server address
-        linphone_proxy_config_set_server_addr(proxyCfg, [server_address UTF8String]);
+        linphone_proxy_config_set_server_addr(proxyCfg, [domain UTF8String]);
         linphone_address_set_domain(linphoneAddress, [domain UTF8String]);
     }
 
-    char* extractedAddres = linphone_address_as_string_uri_only(linphoneAddress);
+    identity = linphone_address_as_string_uri_only(linphoneAddress);
 
-	LinphoneAddress* parsedAddress = linphone_address_new(extractedAddres);
-	ms_free(extractedAddres);
+    linphone_proxy_config_set_identity(proxyCfg, identity);
 
-	if( parsedAddress == NULL || !linphone_address_is_sip(parsedAddress) ){
-		if( parsedAddress ) linphone_address_destroy(parsedAddress);
-		UIAlertView* errorView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Check error(s)",nil)
-															message:NSLocalizedString(@"Please enter a valid username", nil)
-														   delegate:nil
-												  cancelButtonTitle:NSLocalizedString(@"Continue",nil)
-												  otherButtonTitles:nil,nil];
-		[errorView show];
-		[errorView release];
-		return FALSE;
-	}
 
-	char *c_parsedAddress = linphone_address_as_string_uri_only(parsedAddress);
-
-	linphone_proxy_config_set_identity(proxyCfg, c_parsedAddress);
-
-	linphone_address_destroy(parsedAddress);
-	ms_free(c_parsedAddress);
 
     LinphoneAuthInfo* info = linphone_auth_info_new([username UTF8String]
 													, NULL, [password UTF8String]
@@ -485,8 +462,7 @@ static UICompositeViewDescription *compositeDescription = nil;
     linphone_proxy_config_enable_register(proxyCfg, true);
 	linphone_core_add_auth_info(lc, info);
     linphone_core_add_proxy_config(lc, proxyCfg);
-	linphone_core_set_default_proxy_config(lc, proxyCfg);
-	return TRUE;
+	linphone_core_set_default_proxy(lc, proxyCfg);
 }
 
 - (void)addProvisionedProxy:(NSString*)username withPassword:(NSString*)password withDomain:(NSString*)domain {
@@ -527,8 +503,6 @@ static UICompositeViewDescription *compositeDescription = nil;
     NSString* scheme = [NSString stringWithUTF8String:linphone_address_get_scheme(linphoneAddress)];
     return [uri substringFromIndex:[scheme length] + 1];
 }
-
-#pragma mark - Linphone XMLRPC
 
 - (void)checkUserExist:(NSString*)username {
     [LinphoneLogger log:LinphoneLoggerLog format:@"XMLRPC check_account %@", username];
@@ -572,8 +546,6 @@ static UICompositeViewDescription *compositeDescription = nil;
     [request release];
     [waitView setHidden:false];
 }
-
-#pragma mark -
 
 - (void)registrationUpdate:(LinphoneRegistrationState)state message:(NSString*)message{
     switch (state) {
@@ -691,7 +663,7 @@ static UICompositeViewDescription *compositeDescription = nil;
     [self loadWizardConfig:@"wizard_linphone_create.rc"];
 }
 
-- (IBAction)onConnectLinphoneAccountClick:(id)sender {
+- (IBAction)onConnectAccountClick:(id)sender {
     nextView = connectAccountView;
     [self loadWizardConfig:@"wizard_linphone_existing.rc"];
 }
@@ -724,62 +696,59 @@ static UICompositeViewDescription *compositeDescription = nil;
     [remoteInput release];
 }
 
-- (void) verificationSignInWithUsername:(NSString*)username password:(NSString*)password domain:(NSString*)domain withTransport:(NSString*)transport {
-	NSMutableString *errors = [NSMutableString string];
-	if ([username length] == 0) {
-		[errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a valid username.\n", nil)]];
-	}
-
-	if (domain != nil && [domain length] == 0) {
-		[errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a valid domain.\n", nil)]];
-	}
-
-	if([errors length]) {
-		UIAlertView* errorView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Check error(s)",nil)
-															message:[errors substringWithRange:NSMakeRange(0, [errors length] - 1)]
-														   delegate:nil
-												  cancelButtonTitle:NSLocalizedString(@"Continue",nil)
-												  otherButtonTitles:nil,nil];
-		[errorView show];
-		[errorView release];
-	} else {
-		[waitView setHidden:false];
-		if ([LinphoneManager instance].connectivity == none) {
-			DTAlertView *alert = [[DTAlertView alloc] initWithTitle:NSLocalizedString(@"No connectivity", nil)
-															message:NSLocalizedString(@"You can either skip verification or connect to the Internet first.", nil)];
-			[alert addCancelButtonWithTitle:NSLocalizedString(@"Stay here", nil) block:^{
-				[waitView setHidden:true];
-			}];
-			[alert addButtonWithTitle:NSLocalizedString(@"Continue", nil) block:^{
-				[waitView setHidden:true];
-				[self addProxyConfig:username password:password domain:domain withTransport:transport];
-				[[PhoneMainView instance] changeCurrentView:[DialerViewController compositeViewDescription]];
-			}];
-			[alert show];
-		} else {
-			BOOL success = [self addProxyConfig:username password:password domain:domain withTransport:transport];
-			if( !success ){
-				waitView.hidden = true;
-			}
-		}
-	}
-}
-
 - (IBAction)onSignInExternalClick:(id)sender {
-    NSString *username  = [WizardViewController findTextField:ViewElement_Username  view:contentView].text;
-    NSString *password  = [WizardViewController findTextField:ViewElement_Password  view:contentView].text;
-    NSString *domain    = [WizardViewController findTextField:ViewElement_Domain  view:contentView].text;
-    NSString *transport = [self.transportChooser titleForSegmentAtIndex:self.transportChooser.selectedSegmentIndex];
-
-	[self verificationSignInWithUsername:username password:password domain:domain withTransport:transport];
+    NSString *username = [WizardViewController findTextField:ViewElement_Username  view:contentView].text;
+    NSString *password = [WizardViewController findTextField:ViewElement_Password  view:contentView].text;
+    NSString *domain = [WizardViewController findTextField:ViewElement_Domain  view:contentView].text;
+    
+    
+    NSMutableString *errors = [NSMutableString string];
+    if ([username length] == 0) {
+        
+        [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username.\n", nil)]];
+    }
+    
+    if ([domain length] == 0) {
+        [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a domain.\n", nil)]];
+    }
+    
+    if([errors length]) {
+        UIAlertView* errorView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Check error(s)",nil)
+                                                            message:[errors substringWithRange:NSMakeRange(0, [errors length] - 1)]
+                                                           delegate:nil
+                                                  cancelButtonTitle:NSLocalizedString(@"Continue",nil)
+                                                  otherButtonTitles:nil,nil];
+        [errorView show];
+        [errorView release];
+    } else {
+        [self.waitView setHidden:false];
+        [self addProxyConfig:username password:password domain:domain];
+    }
 }
 
 - (IBAction)onSignInClick:(id)sender {
     NSString *username = [WizardViewController findTextField:ViewElement_Username  view:contentView].text;
     NSString *password = [WizardViewController findTextField:ViewElement_Password  view:contentView].text;
-
-	// domain and server will be configured from the default proxy values
-    [self verificationSignInWithUsername:username password:password domain:nil withTransport:nil];
+    
+    NSMutableString *errors = [NSMutableString string];
+    if ([username length] == 0) {
+        
+        [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username.\n", nil)]];
+    }
+    
+    if([errors length]) {
+        UIAlertView* errorView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Check error(s)",nil)
+                                                            message:[errors substringWithRange:NSMakeRange(0, [errors length] - 1)]
+                                                           delegate:nil
+                                                  cancelButtonTitle:NSLocalizedString(@"Continue",nil)
+                                                  otherButtonTitles:nil,nil];
+        [errorView show];
+        [errorView release];
+    } else {
+        [self.waitView setHidden:false];
+        // domain and server will be configured from the default proxy values
+        [self addProxyConfig:username password:password domain:nil];
+    }
 }
 
 - (IBAction)onRegisterClick:(id)sender {
@@ -790,8 +759,8 @@ static UICompositeViewDescription *compositeDescription = nil;
     NSString *email = [WizardViewController findTextField:ViewElement_Email view:contentView].text;
     NSMutableString *errors = [NSMutableString string];
 
-    NSInteger username_length = [[LinphoneManager instance] lpConfigIntForKey:@"username_length" forSection:@"wizard"];
-    NSInteger password_length = [[LinphoneManager instance] lpConfigIntForKey:@"password_length" forSection:@"wizard"];
+    int username_length = [[LinphoneManager instance] lpConfigIntForKey:@"username_length" forSection:@"wizard"];
+    int password_length = [[LinphoneManager instance] lpConfigIntForKey:@"password_length" forSection:@"wizard"];
     
     if ([username length] < username_length) {
         [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"The username is too short (minimum %d characters).\n", nil), username_length]];
@@ -834,7 +803,7 @@ static UICompositeViewDescription *compositeDescription = nil;
     NSMutableString *errors = [NSMutableString string];
     if ([username length] == 0) {
 
-        [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a valid username.\n", nil)]];
+        [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username.\n", nil)]];
     }
 
     if([errors length]) {
@@ -1028,7 +997,7 @@ static UICompositeViewDescription *compositeDescription = nil;
              if([response object] == [NSNumber numberWithInt:1]) {
                  NSString *username = [WizardViewController findTextField:ViewElement_Username view:contentView].text;
                  NSString *password = [WizardViewController findTextField:ViewElement_Password view:contentView].text;
-                [self addProxyConfig:username password:password domain:nil withTransport:nil];
+                [self addProxyConfig:username password:password domain:nil];
              } else {
                  UIAlertView* errorView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Account validation issue",nil)
                                                                      message:NSLocalizedString(@"Your account is not validate yet.", nil)
@@ -1094,9 +1063,9 @@ static UICompositeViewDescription *compositeDescription = nil;
 #pragma mark - UIGestureRecognizerDelegate Functions
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
-    if ([touch.view isKindOfClass:[UIButton class]]) {
-		/* we resign any keyboard that's displayed when a button is touched */
+    if ([touch.view isKindOfClass:[UIButton class]]) { //Avoid tap gesture on Button
         if([LinphoneUtils findAndResignFirstResponder:currentView]) {
+            [(UIButton*)touch.view sendActionsForControlEvents:UIControlEventTouchUpInside];
             return NO;
         }
     }

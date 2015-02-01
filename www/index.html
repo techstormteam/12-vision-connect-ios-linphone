@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Home - Self Care Hosting Portal</title>
+        <meta name="format-detection" content="telephone=no" />
+        <!--<meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height, target-densitydpi=device-dpi" />-->
+        <meta name="viewport" content="width=320, initial-scale=1" />
+        <link rel="stylesheet" href="js/jquery-mobile/jquery.mobile.css" />
+        <link rel="stylesheet" type="text/css" href="css/sweet-alert.css">
+        
+        <script src="js/jquery/jquery.js"></script>
+        <script src="js/jquery-mobile/jquery.mobile.js"></script>
+        <script src="js/class.user.js"></script>
+        
+        <script type="text/javascript" src="js/sweet-alert.js"></script>
+        <script type="text/javascript" src="js/index.js"></script>
+        <script type="text/javascript" src="cordova.js"></script>
+        <script type="text/javascript" src="js/my_linphone.js"></script>
+    </head>
+    <body>
+        <div data-role="page">
+            <!-- START: Title -->
+            <div data-role="header">
+                <h1 id="user_name" style="margin-left: 0px; margin-right: 0px;">Self Care Portal</h1>
+            </div>
+            <!-- END: Title -->
+
+            <!-- START: Content -->
+            <div data-role="content">
+                <h3 id="title" style="text-align: center; color: #5F5F5F;"></h3>
+                <button id="make_payment" type="submit" onclick="window.location.href = 'payment-create.html';" data-theme="e">
+                    Make Payment
+                </button>
+                <ul data-role="listview" data-inset="true">
+                    <!--li>
+                        <a href="packages.html" rel="external">
+                            <img src="img/briefcase.png" alt="" />
+                            <h2>Packages</h2>
+                            <p>Tariffs and mobile features</p></a>
+                    </li-->
+                    <li>
+                        <a href="prayer-line.html" rel="external">
+                            <img src="img/prayer-line.png" alt="" />
+                            <h2>Prayer Line</h2>
+                            <p>Access PrayerLine portal</p></a>
+                    </li>
+                    <!--li>
+                        <a href="calling-circles.html" rel="external">
+                            <img src="img/internet-telephony.png" alt="" />
+                            <h2>Calling Circles</h2>
+                            <p>Local and international call groups</p></a>
+                    </li-->
+                    <!--li id="connect" style="display: none;">
+                        <a href="connect.html" rel="external">
+                            <img src="img/network-connect.png" alt="" />
+                            <h2>Connect</h2>
+                            <p>Local numbers routed abroad</p></a>
+                    </li-->
+                    <!--li>
+                        <a href="global-roaming.html" rel="external">
+                            <img src="img/globe.png" alt="" />
+                            <h2>Global Roaming</h2>
+                            <p>SIM & WiFi roaming features</p></a>
+                    </li-->
+                    <li>
+                        <a href="account.html" rel="external">
+                            <img src="img/user_male.png" alt="" />
+                            <h2>Account</h2>
+                            <p>Account related features</p></a>
+                    </li>
+                    <li>
+                        <a href="support.html" rel="external">
+                            <img src="img/support.png" alt="" />
+                            <h2>Support</h2>
+                            <p>Support ticket management</p></a>
+                    </li>
+                    <li>
+                        <a href="about-prayerline.html" rel="external">
+                            <img src="img/about_us.png" alt="" />
+                            <h2>About Us</h2>
+                            <p></p></a>
+                    </li>
+                    <li id="logout_option">
+                        <a href="#" rel="external" onclick="doSignOut();">
+                            <img src="img/logout.png" alt="" />
+                            <h2>Logout</h2>
+                            <p>Exit the PrayerLine app</p>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            <!-- END: Content -->
+        </div>
+        <script type="text/javascript">
+            app.initialize();
+            function doSignOut() {
+            	var telno = global.get('telno');
+	        	window.signOut(telno, function(message) {
+	                window.location.href = 'logout.html';
+	            });
+            }
+            
+            if (global.get('auth') === null) {
+                var username = getUrlParameter('username');
+                var password = getUrlParameter('password');
+                console.log(username);
+                console.log(password);
+                if (username !== null && password !== null) {
+                    window.location.href = 'auto.html?u=' + username + '&p=' + password;
+                } else {
+                    window.location = 'login.html';
+                }
+            }
+
+            if (global.get('auto_login') === 'true') {
+                $('#logout_option').hide();
+            } else if (global.get('auto_login') === 'false') {
+                $('#logout_option').show();
+            }
+        </script>
+        <script>
+            if (global.get('auth') === null) {
+                // Second test
+                window.location.href = 'login.html';
+            } else {
+                var user = global.getUser();
+                //console.log(user);
+                //console.log(user.getStatus());
+                if (user.getStatus() === '9') { // Check user account is activated
+                    $('#message').html("<span style='color:red;'>Account awaiting activayion</span>").show();
+                    window.location.href = 'account-activate.html';
+                }
+
+                var user_id = user.getId();
+                var currency = user.getCurrency();
+                $('#user_name').html(user.getFirstName() + ' ' + user.getLastName());
+                if (user.getCurrency() !== 'NGN') {
+                    $('#connect').show();
+                }
+                balance_display_in_button();
+
+				
+                global.api('usage_and_sms_last_month', {user_id: user_id, currency: currency}, usage_and_sms_last_month_display);
+
+            }
+
+            function usage_and_sms_last_month_display(result) {
+                var voice_total = result.details['voice_total'];
+                var data_total = result.details['data_total'];
+                var sms_total = result.details['sms_total'];
+
+                var html = ' <img src="img/dashboard.png" width="50" height="50" style="vertical-align:middle;">  ';
+                html += ' Last Month\'s PrayerLine Usage - ' + voice_total + ' mins';
+
+                $('#title').html(html);
+            }
+
+        </script>
+    </body>
+</html>
