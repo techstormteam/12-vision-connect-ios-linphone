@@ -8,7 +8,7 @@
 "Send inband DTMFs" = "إرسال DTMF مع التدفق";
 
 /* Send SIP INFO DTMFs */
-"Send SIP INFO DTMFs" = "إرسال DTMF ك SIP INFO";
+"Send SIP INFO DTMFs" = "إرسال DTMF ك INFO";
 
 /* Incoming call timeout */
 "Incoming call timeout" = "مهلة  محاولة الاتصال";

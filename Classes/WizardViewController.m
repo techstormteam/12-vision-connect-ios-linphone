@@ -20,6 +20,7 @@
 #import "WizardViewController.h"
 #import "LinphoneManager.h"
 #import "PhoneMainView.h"
+#import "NBPhoneNumberUtil.h"
 
 #import <XMLRPCConnection.h>
 #import <XMLRPCConnectionManager.h>
@@ -728,7 +729,22 @@ static UICompositeViewDescription *compositeDescription = nil;
 	NSMutableString *errors = [NSMutableString string];
 	if ([username length] == 0) {
 		[errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a valid username.\n", nil)]];
-	}
+    } else {
+//        NBPhoneNumberUtil *phoneUtil = [NBPhoneNumberUtil sharedInstance];
+//        NSError *anError = nil;
+//        NBPhoneNumber *myNumber = [phoneUtil parseWithPhoneCarrierRegion:username error:&anError];
+//        if (!anError || ![phoneUtil isValidNumber:myNumber]) {
+//            [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username as phone number.\n", nil)]];
+//        }
+        
+        NSString *phoneRegex = @"^((\\+)|(00))[0-9]{6,14}$";
+        NSPredicate *phoneTest = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", phoneRegex];
+        
+        BOOL phoneValidates = [phoneTest evaluateWithObject:username];
+        if (phoneValidates == NO) {
+            [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username as phone number.\n", nil)]];
+        }
+    }
 
 	if (domain != nil && [domain length] == 0) {
 		[errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a valid domain.\n", nil)]];
@@ -770,12 +786,14 @@ static UICompositeViewDescription *compositeDescription = nil;
     NSString *password  = [WizardViewController findTextField:ViewElement_Password  view:contentView].text;
     NSString *domain    = [WizardViewController findTextField:ViewElement_Domain  view:contentView].text;
     NSString *transport = [self.transportChooser titleForSegmentAtIndex:self.transportChooser.selectedSegmentIndex];
-
+    
 	[self verificationSignInWithUsername:username password:password domain:domain withTransport:transport];
 }
 
 - (IBAction)onSignInClick:(id)sender {
     NSString *username = [WizardViewController findTextField:ViewElement_Username  view:contentView].text;
+    
+    
     NSString *password = [WizardViewController findTextField:ViewElement_Password  view:contentView].text;
 
 	// domain and server will be configured from the default proxy values

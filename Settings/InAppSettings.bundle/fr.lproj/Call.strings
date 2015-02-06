@@ -8,7 +8,7 @@
 "Send inband DTMFs" = "Envoyer des DTMFs dans le flux";
 
 /* Send SIP INFO DTMFs */
-"Send SIP INFO DTMFs" = "Envoyer des DTMFs en SIP INFO";
+"Send SIP INFO DTMFs" = "Envoyer des DTMFs en INFO";
 
 /* Incoming call timeout */
 "Incoming call timeout" = "Durée max. sonnerie";

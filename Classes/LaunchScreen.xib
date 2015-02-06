@@ -14,13 +14,6 @@
                 <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" image="background-launch.png" translatesAutoresizingMaskIntoConstraints="NO" id="sxt-rJ-Xjr">
                     <rect key="frame" x="0.0" y="53" width="480" height="374"/>
                 </imageView>
-                <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleAspectFit" image="logo.png" translatesAutoresizingMaskIntoConstraints="NO" id="pz0-nR-x0f" userLabel="logo">
-                    <rect key="frame" x="10" y="70" width="460" height="340"/>
-                    <constraints>
-                        <constraint firstAttribute="height" relation="lessThanOrEqual" constant="500" id="jhC-bn-LAU"/>
-                        <constraint firstAttribute="width" relation="lessThanOrEqual" constant="500" id="zP0-FQ-B8L"/>
-                    </constraints>
-                </imageView>
                 <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" image="strech-top.png" translatesAutoresizingMaskIntoConstraints="NO" id="Mkx-Sj-OCT">
                     <rect key="frame" x="0.0" y="0.0" width="480" height="54"/>
                 </imageView>
@@ -53,6 +46,13 @@
                     <constraints>
                         <constraint firstAttribute="height" constant="54" id="JvO-A4-MZ3"/>
                         <constraint firstAttribute="width" relation="lessThanOrEqual" constant="187" id="Vsa-Cw-3na"/>
+                    </constraints>
+                </imageView>
+                <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleAspectFit" image="logo.png" translatesAutoresizingMaskIntoConstraints="NO" id="pz0-nR-x0f" userLabel="logo">
+                    <rect key="frame" x="10" y="70" width="460" height="340"/>
+                    <constraints>
+                        <constraint firstAttribute="height" relation="lessThanOrEqual" constant="500" id="jhC-bn-LAU"/>
+                        <constraint firstAttribute="width" relation="lessThanOrEqual" constant="500" id="zP0-FQ-B8L"/>
                     </constraints>
                 </imageView>
             </subviews>

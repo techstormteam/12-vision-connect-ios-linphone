@@ -94,6 +94,9 @@ static NSDictionary *DIGIT_MAPPINGS;
  Ref. site (countrycode.org)
  */
 @property (nonatomic, strong, readonly) NSDictionary *coreMetaData;
+@property (nonatomic, strong, readwrite) NSDictionary *unarchiveData;
+@property (nonatomic, strong, readwrite) NSString *filePath;
+@property (nonatomic, strong, readwrite) NSData *fileData;
 
 @property (nonatomic, strong, readwrite) NSMutableDictionary *mapCCode2CN;
 @property (nonatomic, strong, readwrite) NSDictionary *mapCN2CCode;
@@ -537,18 +540,19 @@ static NSDictionary *DIGIT_MAPPINGS;
 
 - (NSDictionary*)loadMetadata:(NSString*)name
 {
-    NSDictionary *unarchiveData = nil;
+    self.unarchiveData = nil;
     
     @try {
-		NSString *filePath = [self.libPhoneBundle pathForResource:name ofType:@"plist"];
-        NSData *fileData = [NSData dataWithContentsOfFile:filePath];
-        unarchiveData = [NSKeyedUnarchiver unarchiveObjectWithData:fileData];
+		self.filePath = [[NSString alloc] initWithString:[self.libPhoneBundle pathForResource:name ofType:@"plist"]];
+        self.fileData = [[NSData alloc] initWithData:[NSData dataWithContentsOfFile:self.filePath]];
+        self.unarchiveData = [NSKeyedUnarchiver unarchiveObjectWithData:self.fileData];
+        self.unarchiveData = [[NSDictionary alloc] initWithDictionary:[NSKeyedUnarchiver unarchiveObjectWithData:self.fileData]];
     }
     @catch (NSException *exception) {
-        return unarchiveData;
+        return self.unarchiveData;
     }
     
-    return unarchiveData;
+    return self.unarchiveData;
 }
 
 
@@ -1174,6 +1178,10 @@ static NSDictionary *DIGIT_MAPPINGS;
     // (e.g. +800) we use the country calling codes instead of the region code as
     // key in the map we have to make sure regionCode is not a number to prevent
     // returning NO for non-geographical country calling codes.
+    BOOL hehe = [self hasValue:regionCode];
+    BOOL uuu = [self isNaN:regionCode];
+    BOOL ueu = [self getMetadataForRegion:regionCode.uppercaseString] != nil;
+    
     return [self hasValue:regionCode] && [self isNaN:regionCode] && [self getMetadataForRegion:regionCode.uppercaseString] != nil;
 }
 
@@ -3493,6 +3501,7 @@ static NSDictionary *DIGIT_MAPPINGS;
 - (BOOL)checkRegionForParsing:(NSString*)numberToParse defaultRegion:(NSString*)defaultRegion
 {
     // If the number is nil or empty, we can't infer the region.
+    BOOL hww = [self isStartingStringByRegex:numberToParse regex:LEADING_PLUS_CHARS_PATTERN];
     return [self isValidRegionCode:defaultRegion] ||
     (numberToParse != nil && numberToParse.length > 0 && [self isStartingStringByRegex:numberToParse regex:LEADING_PLUS_CHARS_PATTERN]);
 }

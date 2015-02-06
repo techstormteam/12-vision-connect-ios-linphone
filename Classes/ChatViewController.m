@@ -118,7 +118,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 	}
     } else {
         UIAlertView* alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Invalid address", nil)
-                                                        message:@"Please specify the entire SIP address for the chat"
+                                                        message:@"Please specify the entire address for the chat"
                                                        delegate:nil
                                               cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
                                               otherButtonTitles:nil];

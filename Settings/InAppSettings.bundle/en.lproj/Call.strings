@@ -8,7 +8,7 @@
 "Send inband DTMFs" = "Send inband DTMFs";
 
 /* Send SIP INFO DTMFs */
-"Send SIP INFO DTMFs" = "Send SIP INFO DTMFs";
+"Send SIP INFO DTMFs" = "Send INFO DTMFs";
 
 /* Incoming call timeout */
 "Incoming call timeout" = "Incoming call timeout";

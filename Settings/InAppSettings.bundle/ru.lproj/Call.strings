@@ -8,7 +8,7 @@
 "Send inband DTMFs" = "Посылать DTMFs";
 
 /* Send SIP INFO DTMFs */
-"Send SIP INFO DTMFs" = "Посылать SIP INFO DTMF(ы)";
+"Send SIP INFO DTMFs" = "Посылать INFO DTMF(ы)";
 
 /* Incoming call timeout */
 "Incoming call timeout" = "Время ожидания входящего звонка";
