@@ -68,7 +68,7 @@
 			<key>KeyboardType</key>
 			<string>URL</string>
 			<key>Title</key>
-			<string>Domain</string>
+			<string>Server</string>
 			<key>Type</key>
 			<string>PSTextFieldSpecifier</string>
 		</dict>

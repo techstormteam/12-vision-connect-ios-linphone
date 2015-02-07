@@ -14,7 +14,7 @@
 "Password" = "كلمة السر";
 
 /* Domain */
-"Domain" = "النطاق";
+"Domain" = "الخادم";
 
 /* Proxy */
 "Proxy" = "الوسيط";

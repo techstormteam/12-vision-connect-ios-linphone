@@ -203,7 +203,7 @@
 "Invalid SIP address" = "Invalid address";
 
 /* No comment provided by engineer. */
-"Invalid username or domain" = "Invalid username or domain";
+"Invalid username or domain" = "Invalid username or serveur";
 
 /* No comment provided by engineer. */
 "Last name" = "Last name";
@@ -281,7 +281,7 @@
 "Photo library" = "Photo library";
 
 /* No comment provided by engineer. */
-"Please enter a valid domain.\n" = "Please enter a valid domain.\n";
+"Please enter a valid domain.\n" = "Please enter a valid serveur.\n";
 
 /* No comment provided by engineer. */
 "Please enter a valid username.\n" = "Please enter a valid username.\n";
