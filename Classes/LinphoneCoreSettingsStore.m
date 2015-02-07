@@ -173,7 +173,7 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 		if (elem && (ai=(LinphoneAuthInfo*)elem->data)){
 			[self setString: linphone_auth_info_get_passwd(ai) forKey:@"password_preference"];
 			[self setString: linphone_auth_info_get_ha1(ai)    forKey:@"ha1_preference"]; // hidden but useful if provisioned
-			[self setString:linphone_auth_info_get_userid(ai)  forKey:@"userid_preference"];
+			//[self setString:linphone_auth_info_get_userid(ai)  forKey:@"userid_preference"];
 		}
 	}
 	{
@@ -334,7 +334,8 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 
 	//mandatory parameters
 	NSString*        username = [self stringForKey:@"username_preference"];
-	NSString*          userID = [self stringForKey:@"userid_preference"];
+	//NSString*          userID = [self stringForKey:@"userid_preference"];
+    NSString*          userID = [[NSString alloc] initWithUTF8String:""];
 	NSString*          domain = [self stringForKey:@"domain_preference"];
 	NSString*       transport = [self stringForKey:@"transport_preference"];
 	NSString*      accountHa1 = [self stringForKey:@"ha1_preference"];
@@ -342,6 +343,24 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 	bool      isOutboundProxy = [self boolForKey:@"outbound_proxy_preference"];
 	BOOL             use_avpf = [self boolForKey:@"avpf_preference"];
 
+    NSString *phoneRegex = @"[0-9]{6,14}$";
+    NSPredicate *phoneTest = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", phoneRegex];
+    
+    BOOL phoneValidates = [phoneTest evaluateWithObject:username];
+    if (phoneValidates == NO) {
+        
+        UIAlertView* errorView = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Check error(s)",nil)
+                                                            message:NSLocalizedString(@"Please enter a username as phone number. For example: 099729649\n", nil)
+                                                           delegate:nil
+                                                  cancelButtonTitle:NSLocalizedString(@"Continue",nil)
+                                                  otherButtonTitles:nil,nil];
+        [errorView show];
+        [errorView release];
+        return;
+    }
+
+    
+    
 	if (username && [username length] >0 && domain && [domain length]>0) {
 		int             expire = [self integerForKey:@"expire_preference"];
 		BOOL        isWifiOnly = [self boolForKey:@"wifi_only_preference"];

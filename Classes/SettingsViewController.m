@@ -496,7 +496,7 @@ static UICompositeViewDescription *compositeDescription = nil;
     } else if( [@"advanced_account_preference" compare:notif.object] == NSOrderedSame) {
 		removeFromHiddenKeys = [[notif.userInfo objectForKey:@"advanced_account_preference"] boolValue];
 
-		[keys addObject:@"userid_preference"];
+		//[keys addObject:@"userid_preference"];
 		[keys addObject:@"proxy_preference"];
 		[keys addObject:@"outbound_proxy_preference"];
 		[keys addObject:@"avpf_preference"];
@@ -663,7 +663,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 	}
 
     if( ![lm lpConfigBoolForKey:@"advanced_account_preference"] ){
-        [hiddenKeys addObject:@"userid_preference"];
+        //[hiddenKeys addObject:@"userid_preference"];
         [hiddenKeys addObject:@"proxy_preference"];
         [hiddenKeys addObject:@"outbound_proxy_preference"];
         [hiddenKeys addObject:@"avpf_preference"];

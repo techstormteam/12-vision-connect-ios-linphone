@@ -737,12 +737,12 @@ static UICompositeViewDescription *compositeDescription = nil;
 //            [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username as phone number.\n", nil)]];
 //        }
         
-        NSString *phoneRegex = @"^((\\+)|(00))[0-9]{6,14}$";
+        NSString *phoneRegex = @"[0-9]{6,14}$";
         NSPredicate *phoneTest = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", phoneRegex];
         
         BOOL phoneValidates = [phoneTest evaluateWithObject:username];
         if (phoneValidates == NO) {
-            [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username as phone number.\n", nil)]];
+            [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username as phone number. For example: 099729649\n", nil)]];
         }
     }
 

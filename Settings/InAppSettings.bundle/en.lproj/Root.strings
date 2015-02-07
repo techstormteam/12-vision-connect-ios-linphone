@@ -1,11 +1,11 @@
 /* SIP account */
-"SIP account" = "Account";
+"SIP account" = "Vision Connect account";
 
 /* Wizard */
 "Wizard" = "Run assistant";
 
 /* User name */
-"User name" = "User name";
+"User name" = "Phone number";
 
 /* User ID */
 "User ID" = "User ID";
