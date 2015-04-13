@@ -134,7 +134,7 @@
 "Email addresses" = "Email addresses";
 
 /* Enter an address */
-"Enter an address" = "Enter an address";
+"Enter an address" = "Enter a phone number";
 
 /* No comment provided by engineer. */
 "Enter provisioning URL" = "Enter provisioning URL";
@@ -254,7 +254,7 @@
 "No microphone" = "No microphone";
 
 /* No comment provided by engineer. */
-"No SIP account configured" = "No Vision Connect account configured";
+"No SIP account configured" = "No My Vision Connect account configured";
 
 /* ICE has not been activated for this call */
 "Not activated" = "Not activated";
@@ -287,7 +287,7 @@
 "Please enter a valid username.\n" = "Please enter a valid username.\n";
 
 /* No comment provided by engineer. */
-"Please make sure your device is connected to the internet and double check your SIP account configuration in the settings." = "Please make sure your device is connected to the internet and double check your Vision Connect account configuration in the settings.";
+"Please make sure your device is connected to the internet and double check your SIP account configuration in the settings." = "Please make sure your device is connected to the internet and double check your My Vision Connect account configuration in the settings.";
 
 /* No comment provided by engineer. */
 "Please terminate GSM call" = "Please terminate GSM call";

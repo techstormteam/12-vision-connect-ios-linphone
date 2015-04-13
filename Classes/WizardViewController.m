@@ -737,7 +737,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 //            [errors appendString:[NSString stringWithFormat:NSLocalizedString(@"Please enter a username as phone number.\n", nil)]];
 //        }
         
-        NSString *phoneRegex = @"[0-9]{6,14}$";
+        NSString *phoneRegex = @"[0-9]{3,14}$";
         NSPredicate *phoneTest = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", phoneRegex];
         
         BOOL phoneValidates = [phoneTest evaluateWithObject:username];
@@ -785,7 +785,8 @@ static UICompositeViewDescription *compositeDescription = nil;
     NSString *username  = [WizardViewController findTextField:ViewElement_Username  view:contentView].text;
     NSString *password  = [WizardViewController findTextField:ViewElement_Password  view:contentView].text;
     NSString *domain    = [WizardViewController findTextField:ViewElement_Domain  view:contentView].text;
-    NSString *transport = [self.transportChooser titleForSegmentAtIndex:self.transportChooser.selectedSegmentIndex];
+//    NSString *transport = [self.transportChooser titleForSegmentAtIndex:self.transportChooser.selectedSegmentIndex];
+    NSString *transport = @"TCP";
     
 	[self verificationSignInWithUsername:username password:password domain:domain withTransport:transport];
 }

@@ -337,13 +337,14 @@ extern void linphone_iphone_log_handler(int lev, const char *fmt, va_list args);
 	//NSString*          userID = [self stringForKey:@"userid_preference"];
     NSString*          userID = [[NSString alloc] initWithUTF8String:""];
 	NSString*          domain = [self stringForKey:@"domain_preference"];
-	NSString*       transport = [self stringForKey:@"transport_preference"];
+//	NSString*       transport = [self stringForKey:@"transport_preference"];
+    NSString*       transport = @"TCP";
 	NSString*      accountHa1 = [self stringForKey:@"ha1_preference"];
 	NSString* accountPassword = [self stringForKey:@"password_preference"];
 	bool      isOutboundProxy = [self boolForKey:@"outbound_proxy_preference"];
 	BOOL             use_avpf = [self boolForKey:@"avpf_preference"];
 
-    NSString *phoneRegex = @"[0-9]{6,14}$";
+    NSString *phoneRegex = @"[0-9]{3,14}$";
     NSPredicate *phoneTest = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", phoneRegex];
     
     BOOL phoneValidates = [phoneTest evaluateWithObject:username];

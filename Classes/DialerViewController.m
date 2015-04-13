@@ -364,6 +364,16 @@ static UICompositeViewDescription *compositeDescription = nil;
         [eraseButton setEnabled:TRUE];
         [addCallButton setEnabled:TRUE];
         [transferButton setEnabled:TRUE];
+        
+        NSString *phoneRegex = @"[0-9]{1,14}$";
+        NSPredicate *phoneTest = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", phoneRegex];
+        
+        BOOL phoneValidates = [phoneTest evaluateWithObject:[addressField text]];
+        if (phoneValidates == NO) {
+            NSString* text = [addressField text];
+            [addressField setText:[text substringToIndex:[text length] - 1]];
+        }
+        
     } else {
         [addContactButton setEnabled:FALSE];
         [eraseButton setEnabled:FALSE];
